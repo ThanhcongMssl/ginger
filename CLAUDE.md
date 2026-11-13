@@ -22,12 +22,18 @@ App mobile trợ lý ảo dựa trên AI:
 - Câu trả lời viết theo văn nói, không markdown, để đưa thẳng vào TTS.
 
 ## Bộ nhớ 3 tầng (backend/app/memory.py)
-1. Ngắn hạn: 20 tin gần nhất của cuộc trò chuyện hiện tại
+1. Ngắn hạn: 20–29 tin gần nhất của cuộc trò chuyện hiện tại (cắt theo bậc 10 tin để prompt cache trúng)
 2. Tóm tắt: mỗi cuộc có một bản tóm tắt, cập nhật sau mỗi 6 tin; đưa tóm tắt 3 cuộc gần nhất vào prompt
 3. Dài hạn: sau mỗi lượt, Haiku trích các sự thật về người dùng → embed → lưu vào
    bảng `memories`. Ký ức có cosine ≥ 0.88 với ký ức cũ thì ghi đè lên ký ức cũ.
    Khi chat, lấy top 8 ký ức liên quan.
 Việc cập nhật bộ nhớ chạy trong BackgroundTask sau khi stream xong.
+
+## Prompt caching (backend/app/llm.py)
+Thứ tự prompt: system (persona + tóm tắt các cuộc trước, không đổi trong một cuộc)
+→ lịch sử (mốc `cache_control` ở tin cuối) → tin mới nhất kèm khối `<ngữ_cảnh>`
+(giờ hiện tại + ký ức liên quan). Không đưa thứ gì đổi theo lượt lên trước lịch sử.
+Log `Claude usage: ...` để kiểm tra cache read/write.
 
 ## Tiến độ
 - [x] Bước 1: backend chat stream + bộ nhớ. Đã test end-to-end trên Postgres thật,

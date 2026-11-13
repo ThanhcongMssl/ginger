@@ -14,7 +14,7 @@ from uuid import UUID
 
 from .config import settings
 from .db import pool
-from .llm import TZ, complete, embed
+from .llm import TZ, PromptContext, complete, embed
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +46,29 @@ async def add_message(conversation_id: UUID, role: str, content: str) -> None:
             "title = COALESCE(title, left(%s, 80)) WHERE id = %s",
             (content if role == "user" else None, conversation_id),
         )
+
+
+async def history_window(conversation_id: UUID) -> list[dict]:
+    """Lịch sử đưa vào prompt: ít nhất `recent_messages` tin, cắt bớt theo bậc 10 tin.
+
+    Không trượt từng tin một: nếu điểm bắt đầu đổi mỗi lượt thì đầu prompt đổi theo
+    và prompt cache của Claude không bao giờ trúng. Cắt theo bậc thì điểm bắt đầu giữ
+    nguyên ~5 lượt liền (cửa sổ dài 20–29 tin).
+    """
+    minimum = settings.recent_messages
+    async with pool.connection() as conn:
+        n = (await (await conn.execute(
+            "SELECT count(*) AS n FROM messages WHERE conversation_id = %s", (conversation_id,)
+        )).fetchone())["n"]
+        start = max(0, (n - minimum) // 10 * 10)
+        rows = await (await conn.execute(
+            "SELECT role, content FROM messages WHERE conversation_id = %s ORDER BY id OFFSET %s",
+            (conversation_id, start),
+        )).fetchall()
+    msgs = [{"role": r["role"], "content": r["content"]} for r in rows]
+    while msgs and msgs[0]["role"] != "user":
+        msgs.pop(0)
+    return msgs
 
 
 async def recent_messages(conversation_id: UUID, limit: int) -> list[dict]:
@@ -189,29 +212,21 @@ async def delete_memory(memory_id: int) -> bool:
 
 # ---------- Ghép ngữ cảnh ----------
 
-async def build_context(conversation_id: UUID, user_text: str) -> tuple[str, list[dict]]:
-    """Trả về (khối ngữ cảnh cho system prompt, danh sách tin nhắn gần nhất)."""
+async def build_context(conversation_id: UUID, user_text: str) -> tuple[PromptContext, list[dict]]:
+    """Trả về (ký ức + tóm tắt để đưa vào prompt, lịch sử gần đây)."""
     # Chạy song song: tìm ký ức (gọi Voyage) là bước chậm nhất.
     memories, summaries, messages = await asyncio.gather(
         search_memories(user_text),
         recent_summaries(exclude=conversation_id),
-        recent_messages(conversation_id, settings.recent_messages),
+        history_window(conversation_id),
     )
 
-    parts = []
-    if memories:
-        parts.append(
-            "Những điều bạn biết về người dùng:\n"
-            + "\n".join(f"- {m['content']}" for m in memories)
-        )
-    if summaries:
-        parts.append(
-            "Tóm tắt các cuộc trò chuyện gần đây:\n"
-            + "\n".join(
-                f"- ({s['updated_at'].astimezone(TZ):%d/%m/%Y}) {s['summary']}" for s in summaries
-            )
-        )
-    return "\n\n".join(parts), messages
+    return PromptContext(
+        memories="\n".join(f"- {m['content']}" for m in memories),
+        summaries="\n".join(
+            f"- ({s['updated_at'].astimezone(TZ):%d/%m/%Y}) {s['summary']}" for s in summaries
+        ),
+    ), messages
 
 
 # ---------- Tiện ích ----------

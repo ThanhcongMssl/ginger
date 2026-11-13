@@ -1,4 +1,6 @@
+import logging
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -12,6 +14,7 @@ claude = AsyncAnthropic(api_key=settings.anthropic_api_key)
 voyage = voyageai.AsyncClient(api_key=settings.voyage_api_key)
 
 TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+log = logging.getLogger("tro-ly.llm")
 
 PERSONA = """Bạn là trợ lý ảo cá nhân của {name}, trò chuyện bằng tiếng Việt.
 Bạn xưng "em", gọi người dùng là "{name}".
@@ -24,26 +27,59 @@ Câu trả lời của bạn sẽ được đọc thành giọng nói, nên:
 - Viết số, đơn vị, ngày tháng theo cách đọc được.
 - Không chắc thì nói thật là không chắc.
 
-Hãy dùng những gì bạn nhớ về người dùng một cách tự nhiên, chỉ khi nó giúp câu
-trả lời tốt hơn; đừng nhắc là bạn "đang tra bộ nhớ".
+Tin nhắn mới nhất của người dùng mở đầu bằng khối <ngữ_cảnh> do hệ thống tự thêm:
+giờ hiện tại và những gì bạn nhớ về người dùng liên quan tới câu hỏi. Hãy dùng nó
+cùng phần tóm tắt bên dưới một cách tự nhiên, chỉ khi giúp câu trả lời tốt hơn;
+đừng nhắc tới khối này hay nói là bạn "đang tra bộ nhớ"."""
 
-Bây giờ là {now} (giờ Việt Nam)."""
+
+@dataclass
+class PromptContext:
+    memories: str  # ký ức liên quan tới câu hỏi: đổi mỗi lượt
+    summaries: str  # tóm tắt các cuộc trước: không đổi suốt một cuộc trò chuyện
 
 
-def system_prompt(context: str) -> str:
+def system_prompt(ctx: PromptContext) -> str:
+    # Chỉ chứa phần không đổi trong một cuộc trò chuyện để prompt cache trúng được.
+    base = PERSONA.format(name=settings.user_name)
+    if ctx.summaries:
+        base += f"\n\nTóm tắt các cuộc trò chuyện gần đây:\n{ctx.summaries}"
+    return base
+
+
+def _now() -> str:
     d = datetime.now(TZ)
     weekday = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"][d.weekday()]
-    now = f"{d:%H:%M}, {weekday} {d:%d/%m/%Y}"
-    base = PERSONA.format(name=settings.user_name, now=now)
-    return f"{base}\n\n{context}" if context else base
+    return f"{d:%H:%M}, {weekday} {d:%d/%m/%Y}"
 
 
-async def stream_reply(context: str, messages: list[dict]) -> AsyncIterator[str]:
+def build_messages(ctx: PromptContext, messages: list[dict]) -> list[dict]:
+    """Sắp prompt cho prompt caching: [system cố định][lịch sử ⟵ mốc cache][ngữ cảnh + câu hỏi].
+
+    Phần thay đổi mỗi lượt (giờ, ký ức) chỉ nằm trong tin cuối; lịch sử lấy nguyên văn
+    từ DB nên lượt sau đọc lại được từ cache.
+    """
+    *history, last = messages
+    block = f"Bây giờ là {_now()} (giờ Việt Nam)."
+    if ctx.memories:
+        block += f"\n\nNhững điều bạn biết về người dùng:\n{ctx.memories}"
+    out = [dict(m) for m in history]
+    if out:
+        out[-1]["content"] = [{
+            "type": "text",
+            "text": out[-1]["content"],
+            "cache_control": {"type": "ephemeral"},
+        }]
+    out.append({"role": last["role"], "content": f"<ngữ_cảnh>\n{block}\n</ngữ_cảnh>\n\n{last['content']}"})
+    return out
+
+
+async def stream_reply(context: PromptContext, messages: list[dict]) -> AsyncIterator[str]:
     async with claude.messages.stream(
         model=settings.chat_model,
         max_tokens=1024,
         system=system_prompt(context),
-        messages=messages,
+        messages=build_messages(context, messages),
         # Câu trả lời nói ngắn, cần nhanh: tắt thinking (Sonnet 5.5 không nhận "disabled",
         # dùng "between_tools") và effort thấp. Mặc định là adaptive + effort high → chờ ~4s.
         thinking={"type": "between_tools"},
@@ -51,6 +87,11 @@ async def stream_reply(context: str, messages: list[dict]) -> AsyncIterator[str]
     ) as stream:
         async for text in stream.text_stream:
             yield text
+        u = (await stream.get_final_message()).usage
+        log.info(
+            "Claude usage: input %s, cache read %s, cache write %s, output %s",
+            u.input_tokens, u.cache_read_input_tokens, u.cache_creation_input_tokens, u.output_tokens,
+        )
 
 
 async def complete(prompt: str, max_tokens: int = 500) -> str:
