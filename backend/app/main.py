@@ -89,121 +89,180 @@ async def finish_turn(conv_id: UUID, user_text: str, reply: str) -> None:
         log.exception("Lỗi khi cập nhật bộ nhớ")
 
 
-# Giữ tham chiếu để task nền không bị dọn mất giữa chừng.
-_background: set[asyncio.Task] = set()
-
-
-def run_in_background(coro) -> None:
-    task = asyncio.create_task(coro)
-    _background.add(task)
-    task.add_done_callback(_background.discard)
-
-
 @app.websocket("/voice")
 async def voice_ws(ws: WebSocket):
-    """Một lượt hold-to-talk trên một kết nối.
+    """Hội thoại giọng nói trên một WebSocket, một hoặc nhiều lượt.
 
-    App → server: {"type":"start","sample_rate","channels","conversation_id"}, các frame
-    binary PCM s16le, rồi {"type":"end"} khi thả nút (hoặc {"type":"cancel"}).
-    Server → app: transcript, reply_delta*, reply (kèm audio_id), hoặc error.
+    App → server:
+      {"type":"start","turn","sample_rate","channels","conversation_id"} rồi các frame
+        binary PCM s16le của lượt đó. 'start' tới khi lượt trước còn đang trả lời = ngắt lời.
+      {"type":"end"}: thả nút (hold-to-talk), chốt lượt hiện tại.
+      {"type":"handsfree"}: chuyển sang rảnh tay — tự chốt lượt khi Soniox báo người dùng
+        ngừng nói, và giữ kết nối cho các lượt sau.
+      {"type":"cancel"}: bỏ hết, đóng kết nối.
+    Server → app (đều kèm "turn"): partial*, transcript, reply_delta*, audio*, level*,
+    rồi reply hoặc error. Hold-to-talk: server đóng kết nối sau lượt.
     """
     if ws.headers.get("authorization") != f"Bearer {settings.app_token}":
         await ws.close(code=4401)
         return
     await ws.accept()
 
-    stt = voice.SttSession()
+    send_lock = asyncio.Lock()
+    closing = asyncio.Event()
+    handsfree = False
     conversation_id: UUID | None = None
-    level_tasks: list[asyncio.Task] = []
-    try:
-        while True:
-            msg = await ws.receive()
-            if msg["type"] == "websocket.disconnect":
-                return
-            if msg.get("bytes") is not None:
-                await stt.send_audio(msg["bytes"])
-                continue
-            data = json.loads(msg.get("text") or "{}")
-            if data.get("type") == "start":
-                if data.get("conversation_id"):
-                    conversation_id = UUID(data["conversation_id"])
-                await stt.start(int(data["sample_rate"]), int(data.get("channels", 1)))
-            elif data.get("type") == "end":
-                break
-            elif data.get("type") == "cancel":
-                return
+    stt: voice.SttSession | None = None
+    turn_task: asyncio.Task | None = None
 
-        transcript = await stt.finish()
-        if not transcript:
-            await ws.send_json({"type": "error", "message": "Em chưa nghe rõ, anh nói lại nhé."})
-            return
-        await ws.send_json({"type": "transcript", "text": transcript})
+    async def send(payload: dict) -> None:
+        async with send_lock:
+            await ws.send_json(payload)
 
-        conv_id = await memory.get_or_create_conversation(conversation_id)
-        await memory.add_message(conv_id, "user", transcript)
-        context, messages = await memory.build_context(conv_id, transcript)
+    async def run_turn(turn: int, session: voice.SttSession) -> None:
+        nonlocal conversation_id
 
-        # Đọc từng câu ngay khi Claude viết xong câu đó, không chờ cả câu trả lời.
+        async def emit(payload: dict) -> None:
+            await send({**payload, "turn": turn})
+
+        level_tasks: list[asyncio.Task] = []
         parts: list[str] = []
-        splitter = voice.SentenceSplitter()
-        audio_count = 0
-
-        send_lock = asyncio.Lock()
-
-        async def send(payload: dict) -> None:
-            async with send_lock:
-                await ws.send_json(payload)
-
-        async def send_levels(index: int, audio: voice.TtsAudio) -> None:
-            async for start, values in audio.iter_levels():
-                await send({"type": "level", "index": index, "start": start, "values": values})
-
-        async def speak(sentence: str) -> None:
-            nonlocal audio_count
-            audio_id = voice.queue_tts(sentence)
-            await send({"type": "audio", "audio_id": audio_id, "index": audio_count})
-            audio = voice.get_audio(audio_id)
-            assert audio
-            level_tasks.append(asyncio.create_task(send_levels(audio_count, audio)))
-            audio_count += 1
-
+        transcript = ""
+        conv_id: UUID | None = None
+        saved = False
         try:
-            async for chunk in stream_reply(context, messages):
-                parts.append(chunk)
-                await send({"type": "reply_delta", "text": chunk})
-                for sentence in splitter.feed(chunk):
-                    await speak(sentence)
-            if rest := splitter.flush():
-                await speak(rest)
-        except WebSocketDisconnect:
+            transcript = await session.result()
+            if not transcript:
+                await emit({"type": "error", "message": "Em chưa nghe rõ, anh nói lại nhé."})
+                return
+            await emit({"type": "transcript", "text": transcript})
+
+            conv_id = await memory.get_or_create_conversation(conversation_id)
+            conversation_id = conv_id
+            await memory.add_message(conv_id, "user", transcript)
+            context, messages = await memory.build_context(conv_id, transcript)
+
+            # Đọc từng câu ngay khi Claude viết xong câu đó, không chờ cả câu trả lời.
+            splitter = voice.SentenceSplitter()
+            audio_count = 0
+
+            async def send_levels(index: int, audio: voice.TtsAudio) -> None:
+                async for start, values in audio.iter_levels():
+                    await emit({"type": "level", "index": index, "start": start, "values": values})
+
+            async def speak(sentence: str) -> None:
+                nonlocal audio_count
+                audio_id = voice.queue_tts(sentence)
+                await emit({"type": "audio", "audio_id": audio_id, "index": audio_count})
+                audio = voice.get_audio(audio_id)
+                assert audio
+                level_tasks.append(asyncio.create_task(send_levels(audio_count, audio)))
+                audio_count += 1
+
+            try:
+                async for chunk in stream_reply(context, messages):
+                    parts.append(chunk)
+                    await emit({"type": "reply_delta", "text": chunk})
+                    for sentence in splitter.feed(chunk):
+                        await speak(sentence)
+                if rest := splitter.flush():
+                    await speak(rest)
+            except (WebSocketDisconnect, asyncio.CancelledError):
+                raise
+            except Exception:
+                log.exception("Lỗi khi gọi LLM")
+                parts = [FALLBACK_REPLY]
+                await speak(FALLBACK_REPLY)
+            reply = "".join(parts).strip()
+
+            saved = True
+            voice.spawn(finish_turn(conv_id, transcript, reply))
+            await emit({
+                "type": "reply",
+                "text": reply,
+                "conversation_id": str(conv_id),
+                "audio_count": audio_count,
+            })
+            # Giữ lượt tới khi gửi hết âm lượng của các câu (TTS có thể chưa xong).
+            await asyncio.wait_for(asyncio.gather(*level_tasks), timeout=90)
+        except asyncio.CancelledError:
+            # Bị ngắt lời / mất kết nối giữa chừng: vẫn lưu phần đã trả lời để lịch sử
+            # luân phiên user/assistant đúng như Claude yêu cầu.
+            if conv_id and not saved:
+                voice.spawn(finish_turn(conv_id, transcript, "".join(parts).strip() or "…"))
             raise
-        except Exception:
-            log.exception("Lỗi khi gọi LLM")
-            parts = [FALLBACK_REPLY]
-            await speak(FALLBACK_REPLY)
-        reply = "".join(parts).strip()
+        except Exception as e:
+            log.exception("Lỗi ở lượt %s", turn)
+            try:
+                await emit({"type": "error", "message": f"Lỗi: {e}"})
+            except Exception:
+                pass
+        finally:
+            for task in level_tasks:
+                task.cancel()
+            if not handsfree:
+                closing.set()
 
-        run_in_background(finish_turn(conv_id, transcript, reply))
-        await send({
-            "type": "reply",
-            "text": reply,
-            "conversation_id": str(conv_id),
-            "audio_count": audio_count,
-        })
-        # Giữ kết nối tới khi gửi hết âm lượng của các câu (TTS có thể chưa xong).
-        await asyncio.wait_for(asyncio.gather(*level_tasks), timeout=90)
-    except WebSocketDisconnect:
-        pass
-    except Exception as e:
-        log.exception("Lỗi ở /voice")
+    async def read_loop() -> None:
+        nonlocal stt, turn_task, conversation_id, handsfree
         try:
-            await ws.send_json({"type": "error", "message": f"Lỗi: {e}"})
-        except Exception:
+            while True:
+                msg = await ws.receive()
+                if msg["type"] == "websocket.disconnect":
+                    return
+                if msg.get("bytes") is not None:
+                    if stt:
+                        await stt.send_audio(msg["bytes"])
+                    continue
+                data = json.loads(msg.get("text") or "{}")
+                kind = data.get("type")
+                if kind == "start":
+                    if turn_task:
+                        turn_task.cancel()
+                    if data.get("conversation_id"):
+                        conversation_id = UUID(data["conversation_id"])
+                    turn = int(data.get("turn", 0))
+
+                    async def partial(text: str, turn: int = turn) -> None:
+                        try:
+                            await send({"type": "partial", "text": text, "turn": turn})
+                        except Exception:
+                            pass
+
+                    stt = voice.SttSession(on_partial=partial)
+                    stt.stop_at_endpoint = handsfree
+                    try:
+                        await stt.start(int(data["sample_rate"]), int(data.get("channels", 1)))
+                    except Exception as e:
+                        log.exception("Không mở được Soniox STT")
+                        await send({"type": "error", "message": f"Lỗi: {e}", "turn": turn})
+                        return
+                    turn_task = asyncio.create_task(run_turn(turn, stt))
+                elif kind == "handsfree":
+                    handsfree = True
+                    if stt:
+                        stt.stop_at_endpoint = True
+                elif kind == "end":
+                    if stt:
+                        await stt.finish_audio()
+                elif kind == "cancel":
+                    return
+        except WebSocketDisconnect:
             pass
+        except Exception:
+            log.exception("Lỗi ở /voice")
+        finally:
+            closing.set()
+
+    reader = asyncio.create_task(read_loop())
+    try:
+        await closing.wait()
     finally:
-        for task in level_tasks:
-            task.cancel()
-        await stt.close()
+        reader.cancel()
+        if turn_task:
+            turn_task.cancel()
+        if stt:
+            voice.spawn(stt.close())
         try:
             await ws.close()
         except Exception:

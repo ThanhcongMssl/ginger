@@ -6,6 +6,7 @@ import {
   useAudioStream,
 } from 'expo-audio';
 import { Fredoka_700Bold, useFonts } from '@expo-google-fonts/fredoka';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -27,20 +28,34 @@ const C = {
 
 type Phase = 'idle' | 'listening' | 'thinking' | 'speaking';
 
-// Bấm ngắn hơn mức này coi như bấm nhầm, bỏ qua.
+// Chạm ngắn hơn mức này thì bật chế độ rảnh tay thay vì hold-to-talk.
 const MIN_HOLD_MS = 300;
+// Rảnh tay: im lặng lâu như vậy thì tự thoát (Soniox STT tính tiền theo phút audio).
+const SILENCE_EXIT_MS = 20000;
 
 function VoiceScreen() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [heard, setHeard] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Rảnh tay: nghe → trả lời → tự nghe tiếp, chốt lượt khi anh ngừng nói.
+  const [handsFree, setHandsFree] = useState(false);
+  const handsFreeRef = useRef(false);
+  const phaseRef = useRef<Phase>('idle');
+  phaseRef.current = phase;
 
   const conversationId = useRef<string | null>(null);
   const session = useRef<VoiceSession | null>(null);
+  const permitted = useRef(false);
   const holding = useRef(false);
   const holdStart = useRef(0);
-  const streamStarting = useRef<Promise<void> | null>(null);
-  // Mỗi lần bấm nút là một lượt mới; sự kiện của lượt cũ (bị ngắt lời) thì bỏ qua.
+  // Lần bấm này bắt đầu lúc đang rảnh tay (thì là chạm để thoát / ngắt lời, không phải giữ để nói).
+  const pressInHandsFree = useRef(false);
+  // Chỉ gửi audio lên server khi đang nghe.
+  const micOn = useRef(false);
+  const micStarted = useRef(false);
+  const micQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const silenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mỗi lượt có một số; sự kiện của lượt cũ (bị ngắt lời) thì bỏ qua.
   const turn = useRef(0);
   // Số câu audio của lượt hiện tại, biết khi server gửi 'reply'.
   const [expectedAudio, setExpectedAudio] = useState<number | null>(null);
@@ -62,14 +77,24 @@ function VoiceScreen() {
     channels: 1,
     encoding: 'int16',
     onBuffer: (buf) => {
+      if (!micOn.current) return;
       session.current?.sendAudio(buf);
       Animated.timing(micLevel, { toValue: levelOf(buf.data), duration: 90, useNativeDriver: true }).start();
     },
   });
 
   useEffect(() => {
-    requestRecordingPermissionsAsync();
+    requestRecordingPermissionsAsync().then((p) => (permitted.current = p.granted));
   }, []);
+
+  // Rảnh tay thì giữ màn hình sáng để không bị khoá giữa cuộc trò chuyện.
+  useEffect(() => {
+    if (!handsFree) return;
+    activateKeepAwakeAsync('handsfree');
+    return () => {
+      deactivateKeepAwake('handsfree');
+    };
+  }, [handsFree]);
 
   // Hiệu ứng "đang nghĩ" kéo dài tới khi thật sự nghe thấy tiếng. `playing` bật sớm hơn
   // tiếng thật ~2s (iOS còn chuyển audio session), nên đợi vị trí phát chạy qua 0,15s.
@@ -95,15 +120,6 @@ function VoiceScreen() {
     return () => sub.remove();
   }, [playlist, speakLevel]);
 
-  // Phát hết hàng đợi có thể xảy ra khi câu sau chưa tới, nên chỉ coi là xong khi
-  // server đã báo tổng số câu và đã phát hết đủ số câu đó.
-  useEffect(() => {
-    // Tính cả 'thinking': câu rất ngắn có thể phát xong trước khi kịp chuyển sang 'speaking'.
-    if ((phase === 'speaking' || phase === 'thinking') && expectedAudio !== null && finishedCount >= expectedAudio) {
-      setPhase('idle');
-    }
-  }, [phase, expectedAudio, finishedCount]);
-
   const stopPlayback = useCallback(() => {
     playlist.pause();
     playlist.clear();
@@ -112,12 +128,110 @@ function VoiceScreen() {
     replyLevels.current = [];
   }, [playlist]);
 
-  const handlerFor = useCallback(
-    (myTurn: number) => (e: VoiceEvent) => {
-      if (myTurn !== turn.current) return;
+  /** Bật/tắt micro chạy tuần tự, để lần tắt chưa xong không đè lên lần bật ngay sau đó. */
+  const runMic = useCallback((op: () => Promise<void>) => {
+    const p = micQueue.current.then(op);
+    micQueue.current = p.catch(() => {});
+    return p;
+  }, []);
+
+  const openMic = useCallback(() => {
+    micOn.current = true;
+    return runMic(async () => {
+      if (!micOn.current || micStarted.current) return;
+      // iOS chỉ cho thu âm khi bật allowsRecording.
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await stream.start();
+      micStarted.current = true;
+    });
+  }, [runMic, stream]);
+
+  const closeMic = useCallback(() => {
+    micOn.current = false;
+    return runMic(async () => {
+      if (!micStarted.current) return;
+      micStarted.current = false;
+      stream.stop();
+      // AudioStream đặt session iOS sang category .record + mode .measurement (không phát được).
+      // 'doNotMix' khiến expo-audio gọi setCategory(.playback, mode: .default), reset cả mode.
+      await setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
+        interruptionMode: 'doNotMix',
+      });
+    });
+  }, [runMic, stream]);
+
+  const clearSilenceTimer = useCallback(() => {
+    if (silenceTimer.current) clearTimeout(silenceTimer.current);
+    silenceTimer.current = null;
+  }, []);
+
+  /** Dừng hết: thoát rảnh tay, bỏ lượt hiện tại, tắt micro và tiếng. */
+  const stopAll = useCallback(() => {
+    turn.current += 1;
+    holding.current = false;
+    handsFreeRef.current = false;
+    setHandsFree(false);
+    clearSilenceTimer();
+    session.current?.cancel();
+    session.current = null;
+    closeMic();
+    stopPlayback();
+    setPhase('idle');
+  }, [clearSilenceTimer, closeMic, stopPlayback]);
+
+  const armSilenceTimer = useCallback(() => {
+    clearSilenceTimer();
+    silenceTimer.current = setTimeout(() => {
+      if (handsFreeRef.current && phaseRef.current === 'listening') stopAll();
+    }, SILENCE_EXIT_MS);
+  }, [clearSilenceTimer, stopAll]);
+
+  /** Bắt đầu một lượt nghe trên `session` hiện tại. */
+  const listen = useCallback(() => {
+    turn.current += 1;
+    session.current?.startTurn(turn.current);
+    setHeard('');
+    setError(null);
+    setPhase('listening');
+    if (handsFreeRef.current) armSilenceTimer();
+    openMic().catch((e: unknown) => {
+      stopAll();
+      setError(e instanceof Error ? e.message : 'Không mở được micro');
+    });
+  }, [armSilenceTimer, openMic, stopAll]);
+
+  // Phát hết hàng đợi có thể xảy ra khi câu sau chưa tới, nên chỉ coi là xong khi
+  // server đã báo tổng số câu và đã phát hết đủ số câu đó.
+  useEffect(() => {
+    // Tính cả 'thinking': câu rất ngắn có thể phát xong trước khi kịp chuyển sang 'speaking'.
+    if ((phase === 'speaking' || phase === 'thinking') && expectedAudio !== null && finishedCount >= expectedAudio) {
+      if (handsFreeRef.current) {
+        stopPlayback();
+        listen();
+      } else {
+        setPhase('idle');
+      }
+    }
+  }, [phase, expectedAudio, finishedCount, stopPlayback, listen]);
+
+  const handleEvent = useCallback(
+    (e: VoiceEvent) => {
+      if (e.turn !== turn.current) return;
       switch (e.type) {
+        case 'partial':
+          setHeard(e.text);
+          if (handsFreeRef.current) armSilenceTimer();
+          break;
         case 'transcript':
           setHeard(e.text);
+          // Rảnh tay: server đã chốt lượt vì anh ngừng nói. Tắt micro để không thu tiếng Ginger.
+          if (handsFreeRef.current) {
+            clearSilenceTimer();
+            closeMic();
+            setPhase('thinking');
+          }
           break;
         case 'level': {
           const frames = (replyLevels.current[e.index] ??= []);
@@ -131,91 +245,60 @@ function VoiceScreen() {
           break;
         case 'reply':
           conversationId.current = e.conversation_id;
-          session.current = null;
+          if (!handsFreeRef.current) session.current = null;
           setExpectedAudio(e.audio_count);
-          if (e.audio_count === 0) setPhase('idle');
           break;
         case 'error':
-          session.current = null;
+          stopAll();
           setError(e.message);
-          setPhase('idle');
           break;
       }
     },
-    [playlist],
+    [playlist, armSilenceTimer, clearSilenceTimer, closeMic, stopAll],
   );
 
-  // Bấm lúc đang nghĩ/đang nói thì bỏ lượt cũ (sự kiện của nó bị lọc theo `turn`).
-  // Dừng ngay lúc đang nghĩ/đang nói: bỏ lượt hiện tại (sự kiện còn tới sẽ bị lọc theo `turn`).
-  const stopReply = useCallback(() => {
-    turn.current += 1;
-    session.current?.cancel();
-    session.current = null;
-    stopPlayback();
-    setPhase('idle');
-  }, [stopPlayback]);
-
-  const startTalking = useCallback(async () => {
-    stopPlayback();
-    setError(null);
-
-    const perm = await requestRecordingPermissionsAsync();
-    if (!perm.granted) {
-      setError('Anh cần cho phép dùng micro trong Cài đặt.');
+  const onPressIn = useCallback(async () => {
+    pressInHandsFree.current = handsFreeRef.current;
+    if (pressInHandsFree.current) return;
+    if (!permitted.current) {
+      const perm = await requestRecordingPermissionsAsync();
+      permitted.current = perm.granted;
+      if (!perm.granted) setError('Anh cần cho phép dùng micro trong Cài đặt.');
       return;
     }
-
+    stopPlayback();
     holding.current = true;
     holdStart.current = Date.now();
-    setHeard('');
-    setPhase('listening');
-    turn.current += 1;
-    session.current = new VoiceSession(conversationId.current, handlerFor(turn.current));
+    session.current = new VoiceSession(conversationId.current, handleEvent);
+    listen();
+  }, [stopPlayback, handleEvent, listen]);
 
-    streamStarting.current = (async () => {
-      // iOS chỉ cho thu âm khi bật allowsRecording.
-      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-      await stream.start();
-    })();
-    try {
-      await streamStarting.current;
-    } catch (e) {
-      holding.current = false;
-      session.current?.cancel();
-      session.current = null;
-      setError(e instanceof Error ? e.message : 'Không mở được micro');
-      setPhase('idle');
-    }
-  }, [stopPlayback, stream, handlerFor]);
-
-  const stopTalking = useCallback(async () => {
-    if (!holding.current) return;
-    holding.current = false;
-    try {
-      await streamStarting.current;
-    } catch {
-      return; // lỗi đã xử lý ở startTalking
-    }
-    stream.stop();
-    // AudioStream đặt session iOS sang category .record + mode .measurement (không phát được).
-    // 'doNotMix' khiến expo-audio gọi setCategory(.playback, mode: .default), reset cả mode.
-    await setAudioModeAsync({
-      allowsRecording: false,
-      playsInSilentMode: true,
-      interruptionMode: 'doNotMix',
-    });
-
-    const s = session.current;
-    if (!s) return;
-    if (Date.now() - holdStart.current < MIN_HOLD_MS) {
-      s.cancel();
-      session.current = null;
-      setPhase('idle');
+  const onPressOut = useCallback(async () => {
+    if (pressInHandsFree.current) {
+      // Đang rảnh tay: chạm lúc đang nghe thì thoát, lúc Ginger đang nghĩ/nói thì ngắt lời để nói tiếp.
+      if (phaseRef.current === 'listening') {
+        stopAll();
+      } else {
+        stopPlayback();
+        listen();
+      }
       return;
     }
-    s.end();
+    if (!holding.current) return;
+    holding.current = false;
+    if (Date.now() - holdStart.current < MIN_HOLD_MS) {
+      // Chạm nhanh: chuyển sang rảnh tay, cứ để micro nghe tiếp.
+      handsFreeRef.current = true;
+      setHandsFree(true);
+      session.current?.setHandsFree();
+      armSilenceTimer();
+      return;
+    }
+    await closeMic();
+    if (!session.current) return; // lượt đã bị huỷ (lỗi) trong lúc đang giữ
+    session.current.end();
     setPhase('thinking');
-  }, [stream]);
+  }, [stopAll, stopPlayback, listen, armSilenceTimer, closeMic]);
 
   const listening = phase === 'listening';
 
@@ -240,16 +323,22 @@ function VoiceScreen() {
 
       <View style={styles.footer}>
         <Pressable
-          onPressIn={startTalking}
-          onPressOut={stopTalking}
+          onPressIn={onPressIn}
+          onPressOut={onPressOut}
           style={[styles.talkBtn, listening && styles.talkBtnActive]}
+          accessibilityLabel={handsFree ? (listening ? 'Kết thúc trò chuyện' : 'Ngắt lời') : 'Micro'}
         >
           <MicIcon color={C.ink} size={36} />
         </Pressable>
         {/* Luôn giữ chỗ cho nút dừng để nút micro không bị nhảy khi nút dừng hiện/ẩn. */}
         <View style={styles.stopSlot}>
-          {(phase === 'thinking' || phase === 'speaking') && (
-            <Pressable onPress={stopReply} hitSlop={12} style={styles.stopBtn} accessibilityLabel="Dừng trả lời">
+          {(handsFree || phase === 'thinking' || phase === 'speaking') && (
+            <Pressable
+              onPress={stopAll}
+              hitSlop={12}
+              style={styles.stopBtn}
+              accessibilityLabel={handsFree ? 'Kết thúc trò chuyện' : 'Dừng trả lời'}
+            >
               <View style={styles.stopIcon} />
             </Pressable>
           )}

@@ -7,25 +7,33 @@ const authHeaders = { Authorization: `Bearer ${APP_TOKEN}` };
 
 export type Memory = { id: number; content: string; updated_at: string };
 
-export type VoiceEvent =
+/** Sự kiện của một lượt; `turn` là số lượt app gửi lúc bắt đầu, để bỏ qua sự kiện của lượt cũ. */
+export type VoiceEvent = (
+  /** Chữ tạm thời trong lúc người dùng đang nói. */
+  | { type: 'partial'; text: string }
   | { type: 'transcript'; text: string }
   | { type: 'reply_delta'; text: string }
   | { type: 'audio'; audio_id: string; index: number }
   /** Âm lượng 0..1 của câu `index`, mỗi giá trị là một khung 50 ms, bắt đầu từ khung `start`. */
   | { type: 'level'; index: number; start: number; values: number[] }
   | { type: 'reply'; text: string; conversation_id: string; audio_count: number }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+) & { turn: number };
 
 type PcmChunk = { data: ArrayBuffer; sampleRate: number; channels: number };
 
 /**
- * Một lượt hold-to-talk trên một WebSocket tới backend.
+ * Kết nối WebSocket tới backend cho hội thoại giọng nói.
+ * Hold-to-talk: một lượt rồi server đóng. Rảnh tay: nhiều lượt trên cùng kết nối,
+ * server tự chốt lượt khi người dùng ngừng nói.
  * Mở ngay khi bấm nút; audio thu được trước khi kết nối xong sẽ được xếp hàng chờ.
  */
 export class VoiceSession {
   private ws: WebSocket;
   private queue: (string | ArrayBuffer)[] = [];
+  private turn = 0;
   private started = false;
+  private handsFree = false;
   private done = false;
 
   constructor(
@@ -48,13 +56,14 @@ export class VoiceSession {
     };
     this.ws.onmessage = (e) => {
       const event = JSON.parse(String(e.data)) as VoiceEvent;
-      if (event.type === 'reply' || event.type === 'error') this.done = true;
+      // Hold-to-talk: server đóng kết nối sau lượt, không phải lỗi.
+      if (!this.handsFree && (event.type === 'reply' || event.type === 'error')) this.done = true;
       this.onEvent(event);
     };
     this.ws.onclose = () => {
       if (!this.done) {
         this.done = true;
-        this.onEvent({ type: 'error', message: 'Mất kết nối tới server' });
+        this.onEvent({ type: 'error', message: 'Mất kết nối tới server', turn: this.turn });
       }
     };
   }
@@ -64,13 +73,20 @@ export class VoiceSession {
     else if (this.ws.readyState === WebSocket.CONNECTING) this.queue.push(m);
   }
 
-  /** PCM int16 từ micro. Gói đầu tiên kèm cấu hình thật (sample rate có thể khác yêu cầu). */
+  /** Bắt đầu lượt mới; nếu lượt trước còn đang trả lời thì server bỏ nó (ngắt lời). */
+  startTurn(turn: number) {
+    this.turn = turn;
+    this.started = false;
+  }
+
+  /** PCM int16 từ micro. Gói đầu tiên của lượt kèm cấu hình thật (sample rate có thể khác yêu cầu). */
   sendAudio(chunk: PcmChunk) {
     if (!this.started) {
       this.started = true;
       this.send(
         JSON.stringify({
           type: 'start',
+          turn: this.turn,
           sample_rate: chunk.sampleRate,
           channels: chunk.channels,
           conversation_id: this.conversationId,
@@ -80,12 +96,18 @@ export class VoiceSession {
     this.send(chunk.data);
   }
 
+  /** Chuyển sang rảnh tay: server tự chốt lượt khi ngừng nói và giữ kết nối. */
+  setHandsFree() {
+    this.handsFree = true;
+    this.send(JSON.stringify({ type: 'handsfree' }));
+  }
+
   /** Thả nút: báo hết audio, chờ server trả transcript và câu trả lời. */
   end() {
     this.send(JSON.stringify({ type: 'end' }));
   }
 
-  /** Bỏ lượt này (bấm quá ngắn). */
+  /** Bỏ hết và đóng kết nối. */
   cancel() {
     this.done = true;
     this.send(JSON.stringify({ type: 'cancel' }));

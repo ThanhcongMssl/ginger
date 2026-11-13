@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import uuid
+from collections.abc import Awaitable, Callable
 
 import httpx
 import miniaudio
@@ -36,11 +37,18 @@ def _auth() -> dict[str, str]:
 
 
 class SttSession:
-    """Một phiên nhận dạng: mở kết nối, đẩy audio, rồi `finish()` để lấy transcript."""
+    """Một phiên nhận dạng cho một lượt nói.
 
-    def __init__(self) -> None:
+    Bật endpoint detection của Soniox: khi người dùng ngừng nói, Soniox trả token `<end>`.
+    Ở chế độ rảnh tay (`stop_at_endpoint`) thì lượt chốt ngay tại đó; ở hold-to-talk thì
+    bỏ qua `<end>` và chờ app báo thả nút (`finish_audio`).
+    """
+
+    def __init__(self, on_partial: Callable[[str], Awaitable[None]] | None = None) -> None:
         self._ws: ClientConnection | None = None
         self._reader: asyncio.Task[str] | None = None
+        self._on_partial = on_partial
+        self.stop_at_endpoint = False
 
     async def start(self, sample_rate: int, channels: int) -> None:
         self._ws = await connect(STT_URL, additional_headers=_auth(), max_size=None)
@@ -50,38 +58,59 @@ class SttSession:
             "sample_rate": sample_rate,
             "num_channels": channels,
             "language_hints": ["vi", "en"],
+            "enable_endpoint_detection": True,
         }))
         self._reader = asyncio.create_task(self._collect())
 
     async def _collect(self) -> str:
         assert self._ws
         parts: list[str] = []
+        shown = ""
         async for raw in self._ws:
             msg = json.loads(raw)
             if msg.get("error_code"):
                 raise SttError(f"Soniox {msg.get('error_type')}: {msg.get('error_message')}")
+            pending: list[str] = []
+            endpoint = False
             for tok in msg.get("tokens", []):
                 text = tok.get("text", "")
-                if tok.get("is_final") and text not in ("<end>", "<fin>"):
+                if text == "<end>":
+                    endpoint = True
+                elif text == "<fin>":
+                    continue
+                elif tok.get("is_final"):
                     parts.append(text)
+                else:
+                    pending.append(text)
+            if endpoint and self.stop_at_endpoint and "".join(parts).strip():
+                break
+            # Chữ tạm thời (gồm cả token chưa chốt) để app hiện ngay trong lúc nói.
+            partial = "".join(parts + pending).strip()
+            if self._on_partial and partial != shown:
+                shown = partial
+                await self._on_partial(partial)
             if msg.get("finished"):
                 break
         return "".join(parts).strip()
 
     async def send_audio(self, chunk: bytes) -> None:
-        if self._ws:
+        if self._ws and self._reader and not self._reader.done():
             await self._ws.send(chunk)
 
-    async def finish(self, timeout: float = 15) -> str:
-        """Báo hết audio (frame text rỗng) và chờ Soniox trả nốt các token cuối."""
-        if not self._ws or not self._reader:
+    async def finish_audio(self) -> None:
+        """Thả nút: báo hết audio (frame text rỗng) để Soniox chốt nốt các token cuối."""
+        if self._ws and self._reader and not self._reader.done():
+            await self._ws.send("")
+
+    async def result(self, timeout: float | None = None) -> str:
+        """Transcript của lượt: khi tới endpoint (rảnh tay) hoặc khi Soniox chốt xong."""
+        if not self._reader:
             return ""
         try:
-            await self._ws.send("")
-            return await asyncio.wait_for(self._reader, timeout)
+            return await asyncio.wait_for(asyncio.shield(self._reader), timeout)
         finally:
             # Đóng kết nối Soniox mất ~1,2s (chờ bắt tay đóng) nên cho chạy nền.
-            _spawn(self.close())
+            spawn(self.close())
 
     async def close(self) -> None:
         if self._reader and not self._reader.done():
@@ -94,7 +123,8 @@ class SttSession:
 _background: set[asyncio.Task] = set()
 
 
-def _spawn(coro) -> None:
+def spawn(coro) -> None:
+    """Chạy nền, giữ tham chiếu để task không bị dọn mất giữa chừng."""
     task = asyncio.create_task(coro)
     _background.add(task)
     task.add_done_callback(_background.discard)
@@ -122,7 +152,7 @@ class TtsAudio:
         self.done = False
         self.error: Exception | None = None
         self._changed = asyncio.Event()
-        _spawn(self._run(text))
+        spawn(self._run(text))
 
     async def _run(self, text: str) -> None:
         try:

@@ -49,7 +49,12 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
       Độ trễ sau khi thả nút (đo bằng script): transcript ~0,3s, chữ đầu ~1,6–2s,
       byte audio đầu ~2,6–3,2s. Đã có: TTS theo từng câu, phát dần mp3 khi Soniox đang
       tổng hợp (StreamingResponse), Claude tắt thinking + effort low, đóng STT chạy nền.
-- [ ] Bước 4: stream audio theo từng câu, rồi tới hội thoại rảnh tay (VAD, ngắt lời).
+- [~] Bước 4, nấc 1 (rảnh tay, half-duplex): chạm mic = rảnh tay, giữ mic = hold-to-talk.
+      Soniox `enable_endpoint_detection` chốt lượt (~0,3–0,4s sau khi ngừng nói); một
+      WebSocket `/voice` nhiều lượt, sự kiện kèm `turn`; micro tắt khi Ginger nói, phát xong
+      tự nghe tiếp; chạm mic lúc Ginger nói = ngắt lời; im 20s thì tự thoát.
+      Đã test bằng script với key thật; chưa thử trên điện thoại.
+- [ ] Bước 4, nấc 2: ngắt lời bằng giọng (cần AEC → native module + dev build, hoặc LiveKit).
       Cân nhắc LiveKit (có SDK React Native + agent Python) để xử lý chống vọng tiếng.
 
 ## Môi trường dev
