@@ -18,37 +18,51 @@ export type Phase = 'idle' | 'listening' | 'thinking' | 'speaking';
 
 export const ORB = 120;
 
-/** Lúc đang giữ nút: quả cầu đỏ phồng theo âm lượng giọng nói, kèm quầng sáng. */
-export function ListeningOrb({ level }: { level: Animated.Value }) {
+/**
+ * Nút micro. Lúc đang nghe, quanh nút có quầng sáng phồng theo âm lượng giọng anh
+ * (thay cho quả cầu riêng ở giữa màn hình).
+ */
+export function MicButton(props: {
+  listening: boolean;
+  level: Animated.Value;
+  onPress: () => void;
+  label: string;
+}) {
+  const { listening, level } = props;
   const appear = useState(() => new Animated.Value(0))[0];
 
   useEffect(() => {
-    level.setValue(0);
-    const a = Animated.timing(appear, { toValue: 1, duration: 200, useNativeDriver: true });
+    const a = Animated.timing(appear, { toValue: listening ? 1 : 0, duration: 200, useNativeDriver: true });
     a.start();
     return () => a.stop();
-  }, [appear, level]);
+  }, [appear, listening]);
+
+  // Hai lớp quầng: lớp ngoài mờ phồng nhiều, lớp trong đậm phồng ít.
+  const ring = (min: number, max: number, opacity: number) => (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles.micHalo,
+        {
+          opacity: Animated.multiply(appear, level.interpolate({ inputRange: [0, 1], outputRange: [opacity * 0.6, opacity], extrapolate: 'clamp' })),
+          transform: [{ scale: level.interpolate({ inputRange: [0, 1], outputRange: [min, max], extrapolate: 'clamp' }) }],
+        },
+      ]}
+    />
+  );
 
   return (
-    <Animated.View style={[styles.visual, { opacity: appear }]}>
-      <Animated.View
-        style={[
-          styles.orb,
-          styles.listeningHalo,
-          {
-            opacity: level.interpolate({ inputRange: [0, 1], outputRange: [0.15, 0.35] }),
-            transform: [{ scale: level.interpolate({ inputRange: [0, 1], outputRange: [1.1, 2] }) }],
-          },
-        ]}
-      />
-      <Animated.View
-        style={[
-          styles.orb,
-          styles.listeningOrb,
-          { transform: [{ scale: level.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.25] }) }] },
-        ]}
-      />
-    </Animated.View>
+    <View style={styles.micWrap}>
+      {ring(1.15, 1.9, 0.22)}
+      {ring(1.05, 1.4, 0.35)}
+      <Pressable
+        onPress={props.onPress}
+        style={[styles.talkBtn, listening && styles.talkBtnActive]}
+        accessibilityLabel={props.label}
+      >
+        <MicIcon color={C.ink} size={36} />
+      </Pressable>
+    </View>
   );
 }
 
@@ -99,61 +113,83 @@ export function ThinkingOrb() {
   );
 }
 
-// Đường nhịp tim (ECG) cho lúc Ginger đang nói: một chu kỳ dài PERIOD, lặp 3 lần
-// rồi trượt sang trái đúng một chu kỳ để vòng lặp liền mạch.
+// Đường nhịp tim (ECG) cho lúc Ginger đang nói. Mỗi khung hình thêm một điểm ở mép trái và
+// đẩy cả đường sang phải một bước; độ cao của điểm = âm lượng lúc nó sinh ra. Nhờ vậy nhịp
+// chạy từ trái qua phải như máy đo nhịp tim, chỗ to chỗ nhỏ theo giọng đọc.
 const WAVE_W = ORB * 2.4;
 const WAVE_H = ORB;
-const PERIOD = WAVE_W / 2;
 const MID = WAVE_H / 2;
+const STEP = 2; // px mỗi khung (~60 khung/giây → ~120 px/giây)
+const POINTS = Math.ceil(WAVE_W / STEP) + 1;
+// Một nhịp (x 0..1, y tính theo đỉnh cao nhất = 1; âm là lên trên).
 const BEAT: [number, number][] = [
-  [0, 0], [0.28, 0], [0.33, -6], [0.38, 0], [0.44, 0], [0.48, 12],
-  [0.54, -48], [0.6, 40], [0.65, 0], [0.72, 0], [0.8, -14], [0.88, 0], [1, 0],
+  [0, 0], [0.28, 0], [0.33, -0.12], [0.38, 0], [0.44, 0], [0.48, 0.25],
+  [0.54, -1], [0.6, 0.83], [0.65, 0], [0.72, 0], [0.8, -0.29], [0.88, 0], [1, 0],
 ];
-const ECG_PATH = [0, 1, 2]
-  .flatMap((k) => BEAT.map(([x, y]) => `${((k + x) * PERIOD).toFixed(1)},${(MID + y).toFixed(1)}`))
-  .map((p, i) => (i === 0 ? `M${p}` : `L${p}`))
-  .join(' ');
+const BEAT_POINTS = 36; // một nhịp dài 72 px
+const BEAT_SHAPE = Array.from({ length: BEAT_POINTS }, (_, j) => {
+  const x = j / BEAT_POINTS;
+  const k = BEAT.findIndex(([bx]) => bx > x);
+  const [x0, y0] = BEAT[k - 1];
+  const [x1, y1] = BEAT[k];
+  return y0 + ((y1 - y0) * (x - x0)) / (x1 - x0);
+});
+const PEAK = MID * 0.85;
 
-/** Lúc Ginger đang nói: vạch sóng nhịp tim chạy ngang, cao thấp theo âm lượng giọng đọc. */
-export function SpeakingWave({ level }: { level: Animated.Value }) {
-  const shift = useState(() => new Animated.Value(0))[0];
+/**
+ * Lúc Ginger đang nói: vạch nhịp tim chạy từ trái qua phải, cao thấp theo âm lượng giọng đọc.
+ * `level` là ref âm lượng 0..1 (không dùng Animated.Value: giá trị chạy bằng native driver
+ * không báo về JS).
+ */
+export function SpeakingWave({ level }: { level: { current: number } }) {
   const appear = useState(() => new Animated.Value(0))[0];
+  const [path, setPath] = useState('');
 
   useEffect(() => {
-    const animations = [
-      Animated.timing(appear, { toValue: 1, duration: 250, useNativeDriver: true }),
-      Animated.loop(Animated.timing(shift, { toValue: 1, duration: 1100, easing: Easing.linear, useNativeDriver: true })),
-    ];
-    animations.forEach((a) => a.start());
-    return () => animations.forEach((a) => a.stop());
-  }, [shift, appear]);
+    const a = Animated.timing(appear, { toValue: 1, duration: 250, useNativeDriver: true });
+    a.start();
+    return () => a.stop();
+  }, [appear]);
+
+  useEffect(() => {
+    // amps[i] = độ cao của điểm cách mép trái i bước; tick đếm tổng số điểm đã sinh để mỗi
+    // điểm giữ đúng vị trí của nó trong nhịp khi trôi sang phải.
+    const amps = new Array<number>(POINTS).fill(0);
+    let tick = 0;
+    let frame = 0;
+    const loop = () => {
+      tick++;
+      amps.pop();
+      // Lúc ngắt nghỉ gần như phẳng, nói to thì đỉnh vọt lên.
+      amps.unshift(0.08 + 1.07 * Math.min(1, level.current));
+      let d = '';
+      for (let i = 0; i < POINTS; i++) {
+        const y = MID + amps[i] * PEAK * BEAT_SHAPE[(((tick - i) % BEAT_POINTS) + BEAT_POINTS) % BEAT_POINTS];
+        d += `${i ? 'L' : 'M'}${(i * STEP).toFixed(0)},${y.toFixed(1)}`;
+      }
+      setPath(d);
+      frame = requestAnimationFrame(loop);
+    };
+    frame = requestAnimationFrame(loop);
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [level]);
 
   return (
     <Animated.View style={[styles.wave, { opacity: appear }]}>
-      <Animated.View
-        style={{
-          width: PERIOD * 3,
-          height: WAVE_H,
-          transform: [
-            { translateX: shift.interpolate({ inputRange: [0, 1], outputRange: [0, -PERIOD] }) },
-            // Lúc ngắt nghỉ gần như phẳng, nói to thì đỉnh vọt lên.
-            { scaleY: level.interpolate({ inputRange: [0, 1], outputRange: [0.08, 1.15], extrapolate: 'clamp' }) },
-          ],
-        }}
-      >
-        <Svg width={PERIOD * 3} height={WAVE_H}>
-          {/* Lớp quầng mờ phía dưới cho cảm giác phát sáng */}
-          <Path d={ECG_PATH} stroke={C.primary} strokeOpacity={0.25} strokeWidth={10} fill="none" strokeLinejoin="round" strokeLinecap="round" />
-          <Path d={ECG_PATH} stroke={C.primary} strokeWidth={3.5} fill="none" strokeLinejoin="round" strokeLinecap="round" />
-        </Svg>
-      </Animated.View>
+      <Svg width={WAVE_W} height={WAVE_H}>
+        {/* Lớp quầng mờ phía dưới cho cảm giác phát sáng */}
+        <Path d={path} stroke={C.primary} strokeOpacity={0.25} strokeWidth={10} fill="none" strokeLinejoin="round" strokeLinecap="round" />
+        <Path d={path} stroke={C.primary} strokeWidth={3.5} fill="none" strokeLinejoin="round" strokeLinecap="round" />
+      </Svg>
       {/* Phủ màu nền ở hai mép để vạch sóng mờ dần */}
       <Svg width={WAVE_W} height={WAVE_H} style={StyleSheet.absoluteFill}>
         <Defs>
           <LinearGradient id="fade" x1="0" y1="0" x2="1" y2="0">
             <Stop offset="0" stopColor={C.bg} stopOpacity={1} />
-            <Stop offset="0.25" stopColor={C.bg} stopOpacity={0} />
-            <Stop offset="0.75" stopColor={C.bg} stopOpacity={0} />
+            <Stop offset="0.2" stopColor={C.bg} stopOpacity={0} />
+            <Stop offset="0.8" stopColor={C.bg} stopOpacity={0} />
             <Stop offset="1" stopColor={C.bg} stopOpacity={1} />
           </LinearGradient>
         </Defs>
@@ -261,12 +297,13 @@ export const styles = StyleSheet.create({
   visual: { width: ORB * 2.4, height: ORB * 2.4, alignItems: 'center', justifyContent: 'center' },
   wave: { width: WAVE_W, height: WAVE_H, overflow: 'hidden' },
   orb: { position: 'absolute', width: ORB, height: ORB, borderRadius: ORB / 2, backgroundColor: C.primary },
-  listeningOrb: { backgroundColor: C.listening },
-  listeningHalo: { backgroundColor: C.listening },
   ripple: { backgroundColor: 'transparent', borderWidth: 3, borderColor: C.primary },
   heard: { fontSize: 17, lineHeight: 24, color: C.muted, fontStyle: 'italic', textAlign: 'center' },
   error: { fontSize: 16, color: C.error, textAlign: 'center' },
-  footer: { alignItems: 'center', gap: 16, paddingBottom: 20, paddingTop: 12 },
+  // Chừa chỗ cho quầng sáng quanh nút micro (phồng tới ~1,9 lần).
+  footer: { alignItems: 'center', paddingBottom: 56, paddingTop: 48 },
+  micWrap: { alignItems: 'center', justifyContent: 'center' },
+  micHalo: { position: 'absolute', width: 92, height: 92, borderRadius: 46, backgroundColor: C.listening },
   talkBtn: {
     width: 92,
     height: 92,
@@ -275,17 +312,7 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: C.primary,
   },
-  stopSlot: { height: 44, justifyContent: 'center' },
-  stopBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: C.line,
-  },
-  stopIcon: { width: 14, height: 14, borderRadius: 3, backgroundColor: C.ink },
-  talkBtnActive: { backgroundColor: C.listening, transform: [{ scale: 1.1 }] },
+  talkBtnActive: { backgroundColor: C.listening },
   unlockBtn: {
     position: 'absolute',
     top: 72,

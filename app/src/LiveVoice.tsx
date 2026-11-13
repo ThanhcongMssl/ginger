@@ -3,12 +3,13 @@
  * Không chạy trong Expo Go.
  * WebRTC khử tiếng vọng + khử ồn ngay trên máy nên micro mở suốt: anh nói chen vào
  * lúc Ginger đang nói là Ginger dừng lại nghe (agent ở backend/app/agent.py lo phần đó).
- * Chạm mic để bắt đầu trò chuyện, chạm lần nữa hoặc nút dừng để kết thúc.
+ * Chạm mic để bắt đầu trò chuyện, chạm lần nữa để kết thúc.
+ * App native tự bắt đầu khi mở app hoặc quay lại app, và kết thúc khi chuyển sang app khác.
  */
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { RoomEvent, type LocalAudioTrack, type RemoteAudioTrack } from 'livekit-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Animated, Pressable, Text, View } from 'react-native';
+import { Animated, AppState, Platform, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { getLiveKitToken } from './api';
@@ -26,17 +27,20 @@ import {
 import { useDucking } from './ducking';
 import { conversation } from './conversation';
 import {
-  C,
   HeaderButton,
   KeyboardIcon,
-  ListeningOrb,
   Logo,
-  MicIcon,
+  MicButton,
   Phase,
   SpeakingWave,
   ThinkingOrb,
   styles,
 } from './ui';
+
+// Web (Safari) chỉ cho phát âm thanh sau khi anh chạm vào trang, nên vẫn phải chạm mic.
+const AUTO_START = Platform.OS !== 'web';
+// Chỉ tự bắt đầu một lần lúc mở app; chuyển từ chế độ gõ chữ về thì không tự bắt đầu.
+let launched = false;
 
 export default function LiveVoice({ onTextMode }: { onTextMode: () => void }) {
   const [conn, setConn] = useState<{ url: string; token: string } | null>(null);
@@ -44,13 +48,19 @@ export default function LiveVoice({ onTextMode }: { onTextMode: () => void }) {
   const [error, setError] = useState<string | null>(null);
   // ID cuộc trò chuyện (src/conversation.ts): agent báo qua attribute, lần sau gửi lại để nối tiếp.
 
+  // Mỗi lần bắt đầu/kết thúc tăng số này: kết thúc lúc đang lấy token thì bỏ kết quả cũ.
+  const attempt = useRef(0);
+
   const start = useCallback(async () => {
+    const id = ++attempt.current;
     setError(null);
     setStarting(true);
     try {
       await startAudio();
-      setConn(await getLiveKitToken(conversation.current));
+      const c = await getLiveKitToken(conversation.current);
+      if (id === attempt.current) setConn(c);
     } catch (e) {
+      if (id !== attempt.current) return;
       setError(e instanceof Error ? e.message : 'Không kết nối được');
       setStarting(false);
       stopAudio();
@@ -58,6 +68,7 @@ export default function LiveVoice({ onTextMode }: { onTextMode: () => void }) {
   }, []);
 
   const end = useCallback(() => {
+    attempt.current++;
     setConn(null);
     setStarting(false);
     stopAudio();
@@ -73,6 +84,25 @@ export default function LiveVoice({ onTextMode }: { onTextMode: () => void }) {
 
   // Đang trò chuyện thì giữ màn hình sáng.
   const active = starting || conn !== null;
+  const activeRef = useRef(active);
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+
+  // Rảnh tay ngay khi mở app / quay lại app; sang app khác thì kết thúc (STT tính tiền theo
+  // phút, và iOS sẽ treo app ở nền). 'inactive' (vd. hộp thoại xin quyền micro) thì bỏ qua.
+  useEffect(() => {
+    if (!AUTO_START) return;
+    if (!launched) {
+      launched = true;
+      Promise.resolve().then(start);
+    }
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'background') end();
+      else if (state === 'active' && !activeRef.current) start();
+    });
+    return () => sub.remove();
+  }, [start, end]);
   useEffect(() => {
     if (!active) return;
     // Trình duyệt có thể từ chối giữ màn hình sáng (vd. pin yếu): bỏ qua.
@@ -90,7 +120,6 @@ export default function LiveVoice({ onTextMode }: { onTextMode: () => void }) {
         error={error}
         active={starting}
         onMic={starting ? end : start}
-        onStop={end}
         onHistoryCleared={() => (conversation.current = null)}
         onTextMode={onTextMode}
       />
@@ -189,7 +218,11 @@ function Conversation({
   }, [room]);
 
   const micLevel = useLevel(micVolume);
-  const speakLevel = useLevel(agentVolume);
+  // Vạch nhịp tim đọc âm lượng mỗi khung hình nên dùng ref (Animated.Value chạy native không đọc được).
+  const speakLevel = useRef(0);
+  useEffect(() => {
+    speakLevel.current = toLevel(agentVolume);
+  }, [agentVolume]);
 
   return (
     <Layout
@@ -200,21 +233,23 @@ function Conversation({
       micLevel={micLevel}
       speakLevel={speakLevel}
       onMic={onEnd}
-      onStop={onEnd}
     />
   );
 }
 
-/** Âm lượng từ WebRTC (RMS 0..1, thường rất nhỏ) → Animated.Value 0..1 trượt mượt. */
+/** Âm lượng từ WebRTC (RMS 0..1, thường rất nhỏ) → 0..1; căn bậc hai để giọng nhỏ vẫn thấy nhún. */
+const toLevel = (volume: number) => Math.min(1, Math.sqrt(volume) * 1.5);
+
+/** Âm lượng → Animated.Value 0..1 trượt mượt. */
 function useLevel(volume: number) {
   const level = useState(() => new Animated.Value(0))[0];
   useEffect(() => {
-    // Căn bậc hai để giọng nhỏ vẫn thấy nhún, giống cách tính ở backend.
-    const v = Math.min(1, Math.sqrt(volume) * 1.5);
-    Animated.timing(level, { toValue: v, duration: 100, useNativeDriver: true }).start();
+    Animated.timing(level, { toValue: toLevel(volume), duration: 100, useNativeDriver: true }).start();
   }, [volume, level]);
   return level;
 }
+
+const NO_LEVEL = { current: 0 };
 
 function Layout(props: {
   phase: Phase;
@@ -222,14 +257,13 @@ function Layout(props: {
   error: string | null;
   active: boolean;
   micLevel?: Animated.Value;
-  speakLevel?: Animated.Value;
+  speakLevel?: { current: number };
   onMic: () => void;
-  onStop: () => void;
   /** Chỉ có lúc chưa trò chuyện: hiện nút cài đặt và nút chuyển sang gõ chữ. */
   onHistoryCleared?: () => void;
   onTextMode?: () => void;
 }) {
-  const { phase, heard, error, active, onMic, onStop } = props;
+  const { phase, heard, error, active, onMic } = props;
   const zero = useState(() => new Animated.Value(0))[0];
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -247,9 +281,8 @@ function Layout(props: {
 
       <View style={styles.body}>
         <View style={styles.visual}>
-          {phase === 'listening' && <ListeningOrb level={props.micLevel ?? zero} />}
           {phase === 'thinking' && <ThinkingOrb />}
-          {phase === 'speaking' && <SpeakingWave level={props.speakLevel ?? zero} />}
+          {phase === 'speaking' && <SpeakingWave level={props.speakLevel ?? NO_LEVEL} />}
         </View>
         <View style={styles.caption}>
           {heard ? <Text style={styles.heard} numberOfLines={4}>{heard}</Text> : null}
@@ -258,21 +291,12 @@ function Layout(props: {
       </View>
 
       <View style={styles.footer}>
-        <Pressable
+        <MicButton
+          listening={phase === 'listening'}
+          level={props.micLevel ?? zero}
           onPress={onMic}
-          style={[styles.talkBtn, phase === 'listening' && styles.talkBtnActive]}
-          accessibilityLabel={active ? 'Kết thúc trò chuyện' : 'Bắt đầu trò chuyện'}
-        >
-          <MicIcon color={C.ink} size={36} />
-        </Pressable>
-        {/* Luôn giữ chỗ cho nút dừng để nút micro không bị nhảy khi nút dừng hiện/ẩn. */}
-        <View style={styles.stopSlot}>
-          {active && (
-            <Pressable onPress={onStop} hitSlop={12} style={styles.stopBtn} accessibilityLabel="Kết thúc trò chuyện">
-              <View style={styles.stopIcon} />
-            </Pressable>
-          )}
-        </View>
+          label={active ? 'Kết thúc trò chuyện' : 'Bắt đầu trò chuyện'}
+        />
       </View>
     </SafeAreaView>
   );

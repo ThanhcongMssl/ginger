@@ -96,6 +96,9 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
   (không ghi vào eas.json vì repo public). Token không đóng gói: `TokenGate` hỏi một lần, lưu
   Keychain (`expo-secure-store`, nạp lười để dev build cũ không lỗi). Đổi địa chỉ backend thì
   `eas env:update` rồi build lại.
+- Tự rảnh tay (native): mở app hoặc quay lại app (AppState 'active') là tự bắt đầu trò chuyện,
+  sang app khác ('background') thì kết thúc. Web vẫn phải chạm mic (Safari cần chạm mới phát
+  được âm thanh). Chuyển từ chế độ gõ chữ về thì không tự bắt đầu.
 - Chế độ gõ chữ (`src/ChatScreen.tsx`, nút bàn phím ở góc trái header; nút micro để quay lại):
   stream qua `POST /chat`. Hai chế độ dùng chung cuộc trò chuyện (`src/conversation.ts`),
   mở chat thì tải lại tin của cuộc đang mở (cả lượt nói). Web: Enter gửi, Shift+Enter xuống dòng.
