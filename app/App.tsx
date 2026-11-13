@@ -76,6 +76,7 @@ function VoiceScreen() {
   useEffect(() => {
     if (phase === 'thinking' && playlistStatus.playing && playlistStatus.currentTime > 0.15) {
       setPhase('speaking');
+      setHeard('');
     }
   }, [phase, playlistStatus.playing, playlistStatus.currentTime]);
 
