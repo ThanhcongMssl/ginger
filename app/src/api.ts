@@ -1,9 +1,8 @@
 import { fetch } from 'expo/fetch';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
-const APP_TOKEN = process.env.EXPO_PUBLIC_APP_TOKEN ?? '';
+import { API_URL, getAppToken } from './config';
 
-const authHeaders = { Authorization: `Bearer ${APP_TOKEN}` };
+const authHeaders = (token = getAppToken()) => ({ Authorization: `Bearer ${token}` });
 
 export type Memory = { id: number; content: string; updated_at: string };
 
@@ -47,7 +46,7 @@ export class VoiceSession {
       options: { headers: Record<string, string> },
     ) => WebSocket;
     this.ws = new RNWebSocket(`${API_URL.replace(/^http/, 'ws')}/voice`, undefined, {
-      headers: authHeaders,
+      headers: authHeaders(),
     });
     this.ws.binaryType = 'arraybuffer';
     this.ws.onopen = () => {
@@ -115,12 +114,23 @@ export class VoiceSession {
   }
 }
 
+/** Token vào phòng LiveKit mới; backend gọi sẵn agent Ginger vào phòng đó. */
+export async function getLiveKitToken(conversationId: string | null): Promise<{ url: string; token: string }> {
+  const res = await fetch(`${API_URL}/livekit/token`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ conversation_id: conversationId }),
+  });
+  if (!res.ok) throw new Error(res.status === 503 ? 'Backend chưa cấu hình LiveKit' : `Lỗi server ${res.status}`);
+  return (await res.json()) as { url: string; token: string };
+}
+
 export function voiceAudioSource(audioId: string) {
-  return { uri: `${API_URL}/voice/audio/${audioId}`, headers: authHeaders };
+  return { uri: `${API_URL}/voice/audio/${audioId}`, headers: authHeaders() };
 }
 
 export async function getMemories(): Promise<Memory[]> {
-  const res = await fetch(`${API_URL}/memories`, { headers: authHeaders });
+  const res = await fetch(`${API_URL}/memories`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`Lỗi server ${res.status}`);
   return (await res.json()) as Memory[];
 }
@@ -128,7 +138,75 @@ export async function getMemories(): Promise<Memory[]> {
 export async function deleteMemory(id: number): Promise<void> {
   const res = await fetch(`${API_URL}/memories/${id}`, {
     method: 'DELETE',
-    headers: authHeaders,
+    headers: authHeaders(),
   });
   if (!res.ok) throw new Error(`Lỗi server ${res.status}`);
+}
+
+/** Kiểm tra token có đúng không (bản web: lúc anh nhập token). */
+export async function checkAppToken(token: string): Promise<boolean> {
+  const res = await fetch(`${API_URL}/memories`, { headers: authHeaders(token) });
+  if (res.status === 401) return false;
+  if (!res.ok) throw new Error(`Lỗi server ${res.status}`);
+  return true;
+}
+
+export type DataStats = { memories: number; conversations: number };
+
+export async function getDataStats(): Promise<DataStats> {
+  const res = await fetch(`${API_URL}/data/stats`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`Lỗi server ${res.status}`);
+  return (await res.json()) as DataStats;
+}
+
+/** Xoá mọi ký ức dài hạn về người dùng. */
+export async function clearMemories(): Promise<void> {
+  const res = await fetch(`${API_URL}/memories`, { method: 'DELETE', headers: authHeaders() });
+  if (!res.ok) throw new Error(`Lỗi server ${res.status}`);
+}
+
+/** Xoá mọi cuộc trò chuyện, kèm tin nhắn và bản tóm tắt. */
+export async function clearConversations(): Promise<void> {
+  const res = await fetch(`${API_URL}/conversations`, { method: 'DELETE', headers: authHeaders() });
+  if (!res.ok) throw new Error(`Lỗi server ${res.status}`);
+}
+
+export type ChatMessage = { role: 'user' | 'assistant'; content: string };
+
+/** Tin nhắn của một cuộc trò chuyện (cả lượt nói lẫn lượt gõ). */
+export async function getMessages(conversationId: string): Promise<ChatMessage[]> {
+  const res = await fetch(`${API_URL}/conversations/${conversationId}/messages`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`Lỗi server ${res.status}`);
+  return (await res.json()) as ChatMessage[];
+}
+
+/**
+ * Gửi tin nhắn chữ, nhận câu trả lời dạng stream: `onDelta` nhận từng đoạn chữ.
+ * `onConversationId` nhận ID cuộc trò chuyện ngay khi có header (backend tạo mới nếu
+ * `conversationId` là null), trước khi stream xong.
+ * `signal` để dừng giữa chừng: backend vẫn lưu phần đã trả lời.
+ */
+export async function sendChat(
+  message: string,
+  conversationId: string | null,
+  handlers: { onDelta: (text: string) => void; onConversationId: (id: string) => void },
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/chat`, {
+    method: 'POST',
+    signal,
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, conversation_id: conversationId }),
+  });
+  if (!res.ok || !res.body) throw new Error(`Lỗi server ${res.status}`);
+  const id = res.headers.get('X-Conversation-Id');
+  if (id) handlers.onConversationId(id);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const text = decoder.decode(value, { stream: true });
+    if (text) handlers.onDelta(text);
+  }
 }

@@ -2,17 +2,24 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
-from uuid import UUID
+from datetime import timedelta
+from pathlib import Path
+from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from livekit import api as lk_api
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from . import memory, voice
 from .config import settings
 from .db import close_db, init_db, pool
-from .llm import stream_reply
+from .llm import FALLBACK_REPLY, stream_reply
+from .memory import finish_turn
+
+AGENT_NAME = "ginger"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("tro-ly")
@@ -66,7 +73,9 @@ async def chat(req: ChatRequest):
             yield FALLBACK_REPLY
 
     async def after_reply():
-        await finish_turn(conv_id, req.message, "".join(reply))
+        # App bấm dừng (ngắt kết nối): Starlette huỷ stream nhưng vẫn chạy bước này, nên chỉ
+        # lưu phần đã kịp trả lời (giống khi bị ngắt lời bằng giọng).
+        await finish_turn(conv_id, req.message, "".join(reply).strip() or "…")
 
     return StreamingResponse(
         generate(),
@@ -74,19 +83,6 @@ async def chat(req: ChatRequest):
         headers={"X-Conversation-Id": str(conv_id), "Cache-Control": "no-cache"},
         background=BackgroundTask(after_reply),
     )
-
-
-FALLBACK_REPLY = "Xin lỗi, em đang gặp sự cố kết nối. Anh thử lại giúp em nhé."
-
-
-async def finish_turn(conv_id: UUID, user_text: str, reply: str) -> None:
-    """Lưu câu trả lời rồi cập nhật bộ nhớ. Chạy sau khi đã trả lời xong cho app."""
-    await memory.add_message(conv_id, "assistant", reply)
-    try:
-        await memory.extract_memories(conv_id, user_text, reply)
-        await memory.maybe_summarize(conv_id)
-    except Exception:
-        log.exception("Lỗi khi cập nhật bộ nhớ")
 
 
 @app.websocket("/voice")
@@ -304,6 +300,35 @@ async def voice_audio(audio_id: str, range: str | None = Header(default=None)):
     return Response(data, media_type="audio/mpeg", headers=headers)
 
 
+class LiveKitTokenRequest(BaseModel):
+    conversation_id: UUID | None = None
+
+
+@app.post("/livekit/token", dependencies=auth)
+async def livekit_token(req: LiveKitTokenRequest):
+    """Token vào một phòng LiveKit mới, kèm lệnh gọi agent Ginger vào phòng.
+
+    Mỗi lần bấm nói chuyện là một phòng riêng; ID cuộc trò chuyện đi theo metadata
+    của lệnh gọi để agent tiếp tục đúng cuộc trò chuyện cũ.
+    """
+    if not (settings.livekit_url and settings.livekit_api_key and settings.livekit_api_secret):
+        raise HTTPException(status_code=503, detail="Chưa cấu hình LiveKit")
+    room = f"ginger-{uuid4().hex[:12]}"
+    metadata = json.dumps({"conversation_id": str(req.conversation_id) if req.conversation_id else None})
+    token = (
+        lk_api.AccessToken(settings.livekit_api_key, settings.livekit_api_secret)
+        .with_identity("user")
+        .with_name(settings.user_name)
+        .with_ttl(timedelta(minutes=15))
+        .with_grants(lk_api.VideoGrants(room_join=True, room=room))
+        .with_room_config(lk_api.RoomConfiguration(
+            agents=[lk_api.RoomAgentDispatch(agent_name=AGENT_NAME, metadata=metadata)],
+        ))
+        .to_jwt()
+    )
+    return {"url": settings.livekit_url, "token": token}
+
+
 @app.get("/conversations", dependencies=auth)
 async def list_conversations(limit: int = 30):
     async with pool.connection() as conn:
@@ -324,6 +349,21 @@ async def get_messages(conversation_id: UUID):
         )).fetchall()
 
 
+@app.get("/data/stats", dependencies=auth)
+async def get_data_stats():
+    return await memory.data_stats()
+
+
+@app.delete("/conversations", dependencies=auth)
+async def clear_conversations():
+    return {"deleted": await memory.delete_all_conversations()}
+
+
+@app.delete("/memories", dependencies=auth)
+async def clear_memories():
+    return {"deleted": await memory.delete_all_memories()}
+
+
 @app.get("/memories", dependencies=auth)
 async def get_memories():
     return await memory.list_memories()
@@ -334,3 +374,9 @@ async def remove_memory(memory_id: int):
     if not await memory.delete_memory(memory_id):
         raise HTTPException(status_code=404, detail="Không tìm thấy")
     return {"deleted": memory_id}
+
+
+# Bản web của app (`npx expo export -p web` → app/dist). Phục vụ cùng địa chỉ với API để
+# Safari trên iPhone mở qua HTTPS (tailscale serve) mà không cần CORS. Mount cuối cùng để
+# không đè lên các route API; chưa build thì trả 404.
+app.mount("/", StaticFiles(directory=settings.web_dir, html=True, check_dir=False), name="web")

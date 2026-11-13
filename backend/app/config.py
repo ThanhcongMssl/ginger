@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -39,6 +40,14 @@ class Settings:
     stt_model: str = os.getenv("STT_MODEL", "stt-rt-v6")
     tts_model: str = os.getenv("TTS_MODEL", "tts-rt-v2")
     tts_voice: str = os.getenv("TTS_VOICE", "Linh")
+
+    # LiveKit (rảnh tay có khử tiếng vọng). Agent trong app/agent.py tự đọc 3 biến này.
+    livekit_url: str = os.getenv("LIVEKIT_URL", "")
+    livekit_api_key: str = os.getenv("LIVEKIT_API_KEY", "")
+    livekit_api_secret: str = os.getenv("LIVEKIT_API_SECRET", "")
+
+    # Thư mục bản web đã build của app.
+    web_dir: str = os.getenv("WEB_DIR", str(Path(__file__).resolve().parents[2] / "app" / "dist"))
 
 
 settings = Settings()

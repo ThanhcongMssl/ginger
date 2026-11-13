@@ -33,6 +33,9 @@ cùng phần tóm tắt bên dưới một cách tự nhiên, chỉ khi giúp c�
 đừng nhắc tới khối này hay nói là bạn "đang tra bộ nhớ"."""
 
 
+FALLBACK_REPLY = "Xin lỗi, em đang gặp sự cố kết nối. Anh thử lại giúp em nhé."
+
+
 @dataclass
 class PromptContext:
     memories: str  # ký ức liên quan tới câu hỏi: đổi mỗi lượt
@@ -59,7 +62,7 @@ def build_messages(ctx: PromptContext, messages: list[dict]) -> list[dict]:
     Phần thay đổi mỗi lượt (giờ, ký ức) chỉ nằm trong tin cuối; lịch sử lấy nguyên văn
     từ DB nên lượt sau đọc lại được từ cache.
     """
-    *history, last = messages
+    *history, last = _merge_same_role(messages)
     block = f"Bây giờ là {_now()} (giờ Việt Nam)."
     if ctx.memories:
         block += f"\n\nNhững điều bạn biết về người dùng:\n{ctx.memories}"
@@ -71,6 +74,17 @@ def build_messages(ctx: PromptContext, messages: list[dict]) -> list[dict]:
             "cache_control": {"type": "ephemeral"},
         }]
     out.append({"role": last["role"], "content": f"<ngữ_cảnh>\n{block}\n</ngữ_cảnh>\n\n{last['content']}"})
+    return out
+
+
+def _merge_same_role(messages: list[dict]) -> list[dict]:
+    """Gộp các tin liền nhau cùng vai (vd. người dùng nói chen trước khi Ginger kịp nói gì)."""
+    out: list[dict] = []
+    for m in messages:
+        if out and out[-1]["role"] == m["role"]:
+            out[-1] = {**out[-1], "content": f"{out[-1]['content']}\n{m['content']}"}
+        else:
+            out.append(dict(m))
     return out
 
 

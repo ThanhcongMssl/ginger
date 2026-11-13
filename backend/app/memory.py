@@ -210,6 +210,27 @@ async def delete_memory(memory_id: int) -> bool:
         return cur.rowcount > 0
 
 
+async def delete_all_memories() -> int:
+    async with pool.connection() as conn:
+        cur = await conn.execute("DELETE FROM memories")
+        return cur.rowcount
+
+
+async def delete_all_conversations() -> int:
+    """Xoá mọi cuộc trò chuyện (tin nhắn và tóm tắt xoá theo nhờ ON DELETE CASCADE)."""
+    async with pool.connection() as conn:
+        cur = await conn.execute("DELETE FROM conversations")
+        return cur.rowcount
+
+
+async def data_stats() -> dict:
+    async with pool.connection() as conn:
+        return await (await conn.execute(
+            "SELECT (SELECT count(*) FROM memories) AS memories, "
+            "(SELECT count(*) FROM conversations) AS conversations"
+        )).fetchone()
+
+
 # ---------- Ghép ngữ cảnh ----------
 
 async def build_context(conversation_id: UUID, user_text: str) -> tuple[PromptContext, list[dict]]:
@@ -227,6 +248,18 @@ async def build_context(conversation_id: UUID, user_text: str) -> tuple[PromptCo
             f"- ({s['updated_at'].astimezone(TZ):%d/%m/%Y}) {s['summary']}" for s in summaries
         ),
     ), messages
+
+
+# ---------- Sau mỗi lượt ----------
+
+async def finish_turn(conversation_id: UUID, user_text: str, reply: str) -> None:
+    """Lưu câu trả lời rồi cập nhật bộ nhớ. Chạy nền sau khi đã trả lời xong."""
+    await add_message(conversation_id, "assistant", reply)
+    try:
+        await extract_memories(conversation_id, user_text, reply)
+        await maybe_summarize(conversation_id)
+    except Exception:
+        log.exception("Lỗi khi cập nhật bộ nhớ")
 
 
 # ---------- Tiện ích ----------

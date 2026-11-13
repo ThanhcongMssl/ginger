@@ -54,7 +54,54 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
       WebSocket `/voice` nhiều lượt, sự kiện kèm `turn`; micro tắt khi Ginger nói, phát xong
       tự nghe tiếp; chạm mic lúc Ginger nói = ngắt lời; im 20s thì tự thoát.
       Đã test bằng script với key thật; chưa thử trên điện thoại.
-- [ ] Bước 4, nấc 2: ngắt lời bằng giọng (cần AEC → native module + dev build, hoặc LiveKit).
+- [~] Bước 4, nấc 2: ngắt lời bằng giọng qua LiveKit Cloud (anh đã chọn; có tài khoản Apple
+      Developer để làm dev build). `backend/app/agent.py`: AgentSession với Soniox STT/TTS
+      (plugin), chốt lượt bằng endpoint của Soniox (`turn_detection="stt"`, LiveKit chưa có
+      turn detector tiếng Việt), Silero VAD cho ngắt lời, `llm_node` tự gọi Claude + bộ nhớ.
+      Khi bị ngắt, lưu phần đã đọc; tin user liền nhau được gộp trong `llm.build_messages`.
+      `POST /livekit/token` cấp token + dispatch agent `ginger`, conversation_id đi theo
+      metadata. App: `src/LiveVoice.tsx` (dev build) / `src/ExpoGoVoice.tsx` (Expo Go, nấc 1),
+      `App.tsx` chọn theo `Constants.executionEnvironment`.
+      Đã test trọn vòng bằng client Python giả làm app (key LiveKit thật, region India South):
+      hỏi → trả lời, nói chen vào → Ginger dừng (~1,1s), lưu phần đã đọc, trả lời câu mới.
+      Chỉnh đã làm (đo được): STT `sample_rate=24000` khớp room_io (để 16k thì resampler giữ
+      ~1s audio → chốt lượt chậm thêm 1,1s); `max_endpoint_delay_ms=500`; tắt language ID;
+      ngắt lời mode "vad" (mode "adaptive" gọi LiveKit Cloud bị timeout 0,8s rồi mới rơi về VAD);
+      `aec_warmup_duration=1.0` (mặc định khoá ngắt lời 3s đầu); `num_idle_processes=1`.
+      Chưa build/thử trên iPhone.
+- [~] Bản web (Safari, chờ Apple duyệt gói Developer): `LiveVoice.tsx` dùng chung, phần khác
+      nhau nằm ở `src/livekit.tsx` / `src/livekit.web.tsx` và `src/config.ts` / `config.web.ts`.
+      `npx expo export -p web` → `app/dist`, FastAPI mount ở `/` (cùng origin, không CORS).
+      Token không đóng gói vào bản web: `TokenGate` hỏi một lần, lưu localStorage.
+      Đã test trọn vòng bằng Chromium headless (micro giả từ file wav): hỏi → trả lời.
+      HTTPS qua `tailscale serve` trên Windows. Anh đã dùng trên iPhone: ngắt lời bằng giọng OK.
+- Ngắt lời mượt (`src/ducking.ts`): micro to hơn 3× ồn nền (ồn nền đo liên tục) trong 200ms
+  là app hạ giọng Ginger xuống 25% trong ~0,2s; thôi nói 0,8s thì to lại. Server chỉ ngắt
+  khi STT nghe ra ≥1 chữ (`min_words: 1`, để tiếng ồn không làm Ginger dừng rồi đọc tiếp);
+  đo bằng Chromium + file ồn: ồn/lạch cạch không ngắt, nói chen trong ồn thì ngắt sau ~2s.
+  Web cần `webAudioMix` (Safari iOS bỏ qua audio.volume) với AudioContext tạo ngay lúc chạm mic;
+  âm lượng micro tính RMS tuyến tính (`useAudioLevel`) cho cùng thang với native.
+- Cài đặt (`src/Settings.tsx`, nút bánh răng ở header, khoá khi đang trò chuyện): xoá ký ức /
+  lịch sử / tất cả, bấm 2 lần để xác nhận (Alert không chạy trên web); bấm vào dòng "Ký ức về anh" mở
+  trang danh sách ký ức, nút ✕ xoá từng điều (bấm 1 lần, cho trường hợp Ginger nhớ nhầm). Đã test bằng DB tạm.
+- Bắt đầu nhanh (web): agent vào phòng mất 3–5s (kết nối từ WSL tới LiveKit India South, đo
+  bằng script riêng vẫn 3–4s; gọi agent bằng API dispatch còn chậm hơn ~2s nên không dùng).
+  Bản web bật `preConnectBuffer`: micro thu ngay khi kết nối, app hiện "đang nghe" sau ~1s,
+  agent vào thì nhận lại phần đã nói (Opus/webm; trình duyệt không ghi được webm thì tắt).
+  Native không có MediaRecorder nên vẫn chờ agent. Agent không được gọi `ctx.connect()` trước
+  `session.start` (sẽ lỡ bộ đệm). App báo lỗi nếu 15s chưa thấy agent.
+  Đã test bằng Chromium: nói ngay khi chạm mic, agent vào sau 5s vẫn nghe đúng câu hỏi.
+- Bản preview (`eas build --profile preview`, internal distribution, JS đóng gói sẵn): `app/.env`
+  không lên EAS (gitignore), nên `EXPO_PUBLIC_API_URL` nằm ở biến môi trường EAS `preview`
+  (không ghi vào eas.json vì repo public). Token không đóng gói: `TokenGate` hỏi một lần, lưu
+  Keychain (`expo-secure-store`, nạp lười để dev build cũ không lỗi). Đổi địa chỉ backend thì
+  `eas env:update` rồi build lại.
+- Chế độ gõ chữ (`src/ChatScreen.tsx`, nút bàn phím ở góc trái header; nút micro để quay lại):
+  stream qua `POST /chat`. Hai chế độ dùng chung cuộc trò chuyện (`src/conversation.ts`),
+  mở chat thì tải lại tin của cuộc đang mở (cả lượt nói). Web: Enter gửi, Shift+Enter xuống dòng.
+  Đang trả lời thì nút gửi thành nút dừng (AbortController); backend vẫn lưu phần đã trả lời
+  (uvicorn báo ASGI 2.3 nên Starlette huỷ stream rồi vẫn chạy BackgroundTask).
+  Đã test bằng Chromium với Claude thật.
       Cân nhắc LiveKit (có SDK React Native + agent Python) để xử lý chống vọng tiếng.
 
 ## Môi trường dev
@@ -63,14 +110,19 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
   - Expo: chạy `npx expo start --tunnel`
   - Backend: mở port 8000 bằng WSL mirrored networking, hoặc `netsh interface portproxy`
 - Postgres chạy bằng `docker.exe compose up -d` (Docker Desktop, chưa bật WSL integration)
-- Điện thoại gọi backend qua Tailscale: `EXPO_PUBLIC_API_URL=http://<IP Tailscale của máy Windows>:8000`
+- Điện thoại gọi backend qua Tailscale Serve (HTTPS, dev build bị ATS chặn http):
+  `EXPO_PUBLIC_API_URL=https://<máy>.<tailnet>.ts.net` (`tailscale serve --bg 8000` trên Windows)
   (giá trị thật nằm trong `app/.env`),
   Windows `netsh portproxy` 8000 → IP WSL (đổi sau mỗi lần reboot)
 - Expo CLI đăng nhập bằng `EXPO_TOKEN` trong `~/.zshrc`; chạy `npx expo start --tunnel`
+  (dev build: thêm `--dev-client`)
+- Agent LiveKit: `python -m app.agent dev` (process riêng, cạnh uvicorn); cần `LIVEKIT_URL`,
+  `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` trong `backend/.env` — anh tự điền.
 - API key (`ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, `SONIOX_API_KEY`) do anh tự điền vào `backend/.env`.
   Không tự điền hay in key ra.
 
 ## Quy ước
 - Expo: luôn dùng `npx expo install`; tra docs đúng phiên bản SDK (xem app/AGENTS.md)
-- Chạy `npx tsc --noEmit` trước khi báo xong
+- Chạy `npx tsc --noEmit` và `npx expo lint` trước khi báo xong. `expo lint` chỉ quét
+  `src/` (không quét App.tsx ở gốc) nên code màn hình đặt trong `src/`.
 - UI và prompt viết bằng tiếng Việt
