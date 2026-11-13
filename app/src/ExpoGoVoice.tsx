@@ -264,7 +264,7 @@ export default function ExpoGoVoice({ onTextMode }: { onTextMode: () => void }) 
       const perm = await requestRecordingPermissionsAsync();
       permitted.current = perm.granted;
       if (!perm.granted) {
-        setError('Anh cần cho phép dùng micro trong Cài đặt.');
+        setError('Cần cho phép dùng micro trong Cài đặt.');
         return;
       }
     }

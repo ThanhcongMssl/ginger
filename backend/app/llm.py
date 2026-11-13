@@ -1,6 +1,7 @@
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -10,14 +11,25 @@ from anthropic import AsyncAnthropic
 
 from .config import settings
 
+if TYPE_CHECKING:
+    from .chat_models import ChatModel
+
 claude = AsyncAnthropic(api_key=settings.anthropic_api_key)
 voyage = voyageai.AsyncClient(api_key=settings.voyage_api_key)
 
 TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 log = logging.getLogger("tro-ly.llm")
 
-PERSONA = """Bạn là trợ lý ảo cá nhân của {name}, trò chuyện bằng tiếng Việt.
-Bạn xưng "em", gọi người dùng là "{name}".
+PERSONA = """Bạn là Gừng, trợ lý ảo cá nhân, trò chuyện bằng tiếng Việt.
+
+Xưng hô:
+- Luôn tự xưng là "Gừng" (ví dụ "Dạ, Gừng nghe đây", "Để Gừng xem nhé"), không xưng
+  "em", "tôi" hay "mình".
+- Mặc định gọi người dùng là "{name}". Nếu người dùng muốn được gọi khác (chị, bạn,
+  hay tên riêng), dù vừa dặn trong câu này hay đã có trong ký ức, thì gọi theo ý họ.
+  Dặn sau cùng thì thắng.
+- Các câu trả lời cũ trong lịch sử có thể xưng hô khác; không bắt chước, cứ theo quy
+  tắc trên.
 
 Câu trả lời của bạn sẽ được đọc thành giọng nói, nên:
 - Nói tự nhiên, ngắn gọn như đang nói chuyện; thường 1–4 câu, trừ khi được hỏi kỹ.
@@ -33,13 +45,15 @@ cùng phần tóm tắt bên dưới một cách tự nhiên, chỉ khi giúp c�
 đừng nhắc tới khối này hay nói là bạn "đang tra bộ nhớ"."""
 
 
-FALLBACK_REPLY = "Xin lỗi, em đang gặp sự cố kết nối. Anh thử lại giúp em nhé."
+# Không gọi "anh" ở đây: người dùng có thể đã dặn gọi khác.
+FALLBACK_REPLY = "Xin lỗi, Gừng đang gặp sự cố kết nối, thử lại giúp Gừng nhé."
 
 
 @dataclass
 class PromptContext:
     memories: str  # ký ức liên quan tới câu hỏi: đổi mỗi lượt
     summaries: str  # tóm tắt các cuộc trước: không đổi suốt một cuộc trò chuyện
+    model: "ChatModel"  # model người dùng chọn trong Cài đặt (chat_models.py)
 
 
 def system_prompt(ctx: PromptContext) -> str:
@@ -89,22 +103,22 @@ def _merge_same_role(messages: list[dict]) -> list[dict]:
 
 
 async def stream_reply(context: PromptContext, messages: list[dict]) -> AsyncIterator[str]:
+    model = context.model
     async with claude.messages.stream(
-        model=settings.chat_model,
+        model=model.id,
         max_tokens=1024,
         system=system_prompt(context),
         messages=build_messages(context, messages),
-        # Câu trả lời nói ngắn, cần nhanh: tắt thinking (Sonnet 5.5 không nhận "disabled",
-        # dùng "between_tools") và effort thấp. Mặc định là adaptive + effort high → chờ ~4s.
-        thinking={"type": "between_tools"},
-        output_config={"effort": "low"},
+        # Tắt thinking + effort thấp tuỳ model (chat_models._params). Để mặc định
+        # (adaptive + effort high) thì Sonnet chờ ~4s mới ra chữ đầu.
+        **model.params,
     ) as stream:
         async for text in stream.text_stream:
             yield text
         u = (await stream.get_final_message()).usage
         log.info(
-            "Claude usage: input %s, cache read %s, cache write %s, output %s",
-            u.input_tokens, u.cache_read_input_tokens, u.cache_creation_input_tokens, u.output_tokens,
+            "Claude usage (%s): input %s, cache read %s, cache write %s, output %s",
+            model.id, u.input_tokens, u.cache_read_input_tokens, u.cache_creation_input_tokens, u.output_tokens,
         )
 
 

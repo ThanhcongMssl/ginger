@@ -89,7 +89,7 @@ function UnlockAudio() {
   if (canPlayAudio) return null;
   return (
     <Pressable onPress={startAudio} style={styles.unlockBtn}>
-      <Text style={styles.unlockText}>Chạm để nghe Ginger</Text>
+      <Text style={styles.unlockText}>Chạm để nghe Gừng</Text>
     </Pressable>
   );
 }

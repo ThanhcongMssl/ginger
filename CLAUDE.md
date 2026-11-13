@@ -12,7 +12,11 @@ App mobile trợ lý ảo dựa trên AI:
 ## Các quyết định đã chốt
 - **Nền tảng:** app mobile, dùng React Native + Expo (SDK 58), TypeScript
 - **Dùng API trả phí, không tự host model:**
-  - LLM: Claude (`claude-sonnet-5-5` để chat, `claude-haiku-5-5` cho việc nền)
+  - LLM: Claude. Model để chat: người dùng chọn dòng Haiku / Sonnet / Opus trong Cài đặt (mặc
+    định Sonnet), không chọn phiên bản. `backend/app/chat_models.py` hỏi Models API lấy bản mới
+    nhất của dòng đó (nhớ 1 giờ), chọn cách tắt thinking theo `capabilities` của model (Sonnet 5.5
+    chỉ nhận `between_tools`, Haiku nhận `disabled`, Opus 5.5 không tắt được), lưu lựa chọn ở bảng
+    `settings` (agent chạy process riêng). Việc nền: `claude-haiku-5-5`
   - Embedding: Voyage AI `voyage-3.5` (1024 chiều)
   - Giọng nói (giai đoạn 3): STT bằng Soniox; TTS bằng Soniox hoặc Vbee/FPT.AI nếu cần giọng Việt tự nhiên hơn
 - **Kiến trúc pipeline:** STT → LLM + bộ nhớ → TTS. Không dùng model speech-to-speech
@@ -20,6 +24,12 @@ App mobile trợ lý ảo dựa trên AI:
 - **Backend:** FastAPI + Postgres/pgvector. App không chứa API key của nhà cung cấp nào;
   app gọi backend bằng `APP_TOKEN` tự đặt.
 - Câu trả lời viết theo văn nói, không markdown, để đưa thẳng vào TTS.
+- Xưng hô (`PERSONA` trong backend/app/llm.py): trợ lý tự xưng "Gừng", mặc định gọi người
+  dùng là "anh". Không có màn cài đặt: người dùng nói "gọi tôi là chị/bạn…" thì Gừng đổi ngay,
+  và ký ức lưu thành câu cố định "Người dùng muốn được gọi là …"
+  (`ADDRESS_PREFIX` trong memory.py). Mỗi lần dặn mới thì xoá câu cũ, nên chỉ giữ lần dặn sau cùng.
+  Câu báo lỗi cố định không gọi "anh". Chữ trong app gọi trợ lý là "Gừng" và không gọi "anh";
+  tên app và logo vẫn là "Ginger".
 
 ## Bộ nhớ 3 tầng (backend/app/memory.py)
 1. Ngắn hạn: 20–29 tin gần nhất của cuộc trò chuyện hiện tại (cắt theo bậc 10 tin để prompt cache trúng)

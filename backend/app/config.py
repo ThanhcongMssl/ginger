@@ -20,7 +20,7 @@ class Settings:
     # Token tự đặt để app mobile gọi backend. Không phải API key của nhà cung cấp.
     app_token: str = _req("APP_TOKEN")
 
-    chat_model: str = os.getenv("CHAT_MODEL", "claude-sonnet-5-5")
+    # Model để trò chuyện chọn trong app (Cài đặt), xem chat_models.py.
     # Model rẻ, nhanh cho việc nền: trích ký ức, tóm tắt.
     utility_model: str = os.getenv("UTILITY_MODEL", "claude-haiku-5-5")
     embed_model: str = os.getenv("EMBED_MODEL", "voyage-3.5")

@@ -114,7 +114,7 @@ export class VoiceSession {
   }
 }
 
-/** Token vào phòng LiveKit mới; backend gọi sẵn agent Ginger vào phòng đó. */
+/** Token vào phòng LiveKit mới; backend gọi sẵn agent Gừng vào phòng đó. */
 export async function getLiveKitToken(conversationId: string | null): Promise<{ url: string; token: string }> {
   const res = await fetch(`${API_URL}/livekit/token`, {
     method: 'POST',
@@ -168,6 +168,26 @@ export async function clearMemories(): Promise<void> {
 /** Xoá mọi cuộc trò chuyện, kèm tin nhắn và bản tóm tắt. */
 export async function clearConversations(): Promise<void> {
   const res = await fetch(`${API_URL}/conversations`, { method: 'DELETE', headers: authHeaders() });
+  if (!res.ok) throw new Error(`Lỗi server ${res.status}`);
+}
+
+export type ModelFamily = 'haiku' | 'sonnet' | 'opus';
+/** `models`: bản mới nhất của từng dòng, backend tự tra (vd. "Claude Opus 5.5"). */
+export type AppSettings = { model: ModelFamily; models: { family: ModelFamily; name: string }[] };
+
+export async function getSettings(): Promise<AppSettings> {
+  const res = await fetch(`${API_URL}/settings`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`Lỗi server ${res.status}`);
+  return (await res.json()) as AppSettings;
+}
+
+/** Chọn dòng model để trò chuyện; áp dụng từ câu hỏi tiếp theo. */
+export async function setModel(model: ModelFamily): Promise<void> {
+  const res = await fetch(`${API_URL}/settings`, {
+    method: 'PUT',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model }),
+  });
   if (!res.ok) throw new Error(`Lỗi server ${res.status}`);
 }
 

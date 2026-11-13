@@ -109,7 +109,7 @@ export default function ChatScreen({ onVoiceMode }: { onVoiceMode: () => void })
         >
           {loading && <ActivityIndicator color={C.primary} style={s.loading} />}
           {!loading && messages.length === 0 && (
-            <Text style={s.empty}>Anh cần gì cứ nhắn cho Ginger nhé.</Text>
+            <Text style={s.empty}>Cần gì cứ nhắn cho Gừng nhé.</Text>
           )}
           {messages.map((m, i) =>
             m.role === 'assistant' && !m.content ? null : (
@@ -133,7 +133,7 @@ export default function ChatScreen({ onVoiceMode }: { onVoiceMode: () => void })
             style={s.input}
             value={input}
             onChangeText={setInput}
-            placeholder="Nhắn cho Ginger…"
+            placeholder="Nhắn cho Gừng…"
             placeholderTextColor={C.muted}
             multiline
             // Web: textarea mặc định cao 2 dòng.

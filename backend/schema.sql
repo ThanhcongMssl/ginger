@@ -33,3 +33,9 @@ CREATE TABLE IF NOT EXISTS memories (
 );
 CREATE INDEX IF NOT EXISTS memories_embedding_idx
     ON memories USING hnsw (embedding vector_cosine_ops);
+
+-- Cài đặt chỉnh trong app, dạng khoá → giá trị (vd. chat_model = dòng model Claude để trò chuyện).
+CREATE TABLE IF NOT EXISTS settings (
+    key    TEXT PRIMARY KEY,
+    value  TEXT NOT NULL
+);

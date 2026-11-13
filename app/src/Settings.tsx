@@ -1,5 +1,5 @@
 /**
- * Nút bánh răng ở header + màn hình Cài đặt. Hiện có phần xoá dữ liệu bộ nhớ của Ginger.
+ * Nút bánh răng ở header + màn hình Cài đặt. Chọn model và xoá dữ liệu bộ nhớ của Gừng.
  * Xoá phải bấm 2 lần (Alert của React Native không chạy trên web).
  */
 import { useCallback, useEffect, useState } from 'react';
@@ -12,8 +12,12 @@ import {
   deleteMemory,
   getDataStats,
   getMemories,
+  getSettings,
+  setModel,
+  type AppSettings,
   type DataStats,
   type Memory,
+  type ModelFamily,
 } from './api';
 import { BackIcon, C, GearIcon, styles as ui } from './ui';
 
@@ -46,14 +50,21 @@ export function SettingsButton({ disabled, onHistoryCleared }: Props) {
 
 type Target = 'memories' | 'history' | 'all';
 
+const FAMILY_LABEL: Record<ModelFamily, { title: string; hint: string }> = {
+  haiku: { title: 'Haiku', hint: 'Nhanh, rẻ, trả lời đơn giản' },
+  sonnet: { title: 'Sonnet', hint: 'Cân bằng giữa nhanh và hay' },
+  opus: { title: 'Opus', hint: 'Sâu sắc nhất, chậm và đắt hơn' },
+};
+
 function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onHistoryCleared: () => void }) {
   const [stats, setStats] = useState<DataStats | null>(null);
   const [memories, setMemories] = useState<Memory[] | null>(null);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
   const [removing, setRemoving] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<Target | null>(null);
   const [busy, setBusy] = useState<Target | null>(null);
-  // Trang con: danh sách từng ký ức (mở khi bấm vào dòng "Ký ức về anh").
+  // Trang con: danh sách từng ký ức (mở khi bấm vào dòng "Ký ức của Gừng").
   const [page, setPage] = useState<'main' | 'memories'>('main');
 
   const load = useCallback(async () => {
@@ -68,13 +79,28 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
   }, []);
 
   useEffect(() => {
-    Promise.all([getDataStats(), getMemories()])
-      .then(([st, mem]) => {
+    Promise.all([getDataStats(), getMemories(), getSettings()])
+      .then(([st, mem, set]) => {
         setStats(st);
         setMemories(mem);
+        setSettings(set);
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Không kết nối được server'));
   }, []);
+
+  // Đổi ngay trên giao diện; lưu lỗi thì quay về lựa chọn cũ.
+  const chooseModel = async (family: ModelFamily) => {
+    if (!settings || settings.model === family) return;
+    const before = settings.model;
+    setSettings({ ...settings, model: family });
+    try {
+      await setModel(family);
+      setError(null);
+    } catch (e) {
+      setSettings((cur) => (cur ? { ...cur, model: before } : cur));
+      setError(e instanceof Error ? e.message : 'Không lưu được');
+    }
+  };
 
   // Bấm lần 1 mà không bấm tiếp trong 4 giây thì thôi.
   useEffect(() => {
@@ -105,7 +131,7 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
     }
   };
 
-  // Xoá một ký ức (vd. Ginger nhớ nhầm): bấm một lần là xoá, mất ít nên không cần xác nhận.
+  // Xoá một ký ức (vd. Gừng nhớ nhầm): bấm một lần là xoá, mất ít nên không cần xác nhận.
   const removeMemory = async (id: number) => {
     if (removing !== null) return;
     setRemoving(id);
@@ -157,7 +183,7 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
           <Pressable onPress={() => setPage('main')} hitSlop={8} style={s.back} accessibilityLabel="Quay lại Cài đặt">
             <BackIcon />
           </Pressable>
-          <Text style={s.title}>Ký ức về anh</Text>
+          <Text style={s.title}>Ký ức của Gừng</Text>
           <Pressable onPress={onClose} hitSlop={8} style={s.done}>
             <Text style={s.doneText}>Xong</Text>
           </Pressable>
@@ -167,7 +193,7 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
             {memories === null ? (
               <ActivityIndicator color={C.primary} style={s.memLoading} />
             ) : memories.length === 0 ? (
-              <Text style={s.memEmpty}>Ginger chưa nhớ gì về anh.</Text>
+              <Text style={s.memEmpty}>Gừng chưa nhớ gì cả.</Text>
             ) : (
               memories.map((m, i) => (
                 <View key={m.id}>
@@ -191,7 +217,7 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
               ))
             )}
           </View>
-          <Text style={s.note}>Ginger nhớ nhầm điều gì thì bấm ✕ để xoá điều đó.</Text>
+          <Text style={s.note}>Gừng nhớ nhầm điều gì thì bấm ✕ để xoá điều đó.</Text>
           {error && <Text style={ui.error}>{error}</Text>}
         </ScrollView>
       </SafeAreaView>
@@ -207,12 +233,42 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
         </Pressable>
       </View>
       <ScrollView contentContainerStyle={s.body}>
-        <Text style={s.section}>BỘ NHỚ CỦA GINGER</Text>
+        <Text style={s.section}>MODEL TRẢ LỜI</Text>
+        <View style={s.card}>
+          {settings === null ? (
+            <ActivityIndicator color={C.primary} style={s.memLoading} />
+          ) : (
+            settings.models.map((m, i) => {
+              const selected = m.family === settings.model;
+              return (
+                <View key={m.family}>
+                  {i > 0 && <View style={s.sep} />}
+                  <Pressable
+                    onPress={() => chooseModel(m.family)}
+                    style={({ pressed }) => [s.row, pressed && s.rowPressed]}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={`${FAMILY_LABEL[m.family].title}: ${FAMILY_LABEL[m.family].hint}`}
+                  >
+                    <View style={s.rowText}>
+                      <Text style={s.rowTitle}>{FAMILY_LABEL[m.family].title}</Text>
+                      <Text style={s.rowDetail}>{FAMILY_LABEL[m.family].hint}</Text>
+                    </View>
+                    <Text style={[s.check, !selected && s.checkOff]}>✓</Text>
+                  </Pressable>
+                </View>
+              );
+            })
+          )}
+        </View>
+        <Text style={s.note}>Luôn dùng bản mới nhất của dòng đã chọn. Áp dụng từ câu hỏi tiếp theo.</Text>
+
+        <Text style={s.section}>BỘ NHỚ CỦA GỪNG</Text>
         <View style={s.card}>
           {row(
             'memories',
-            'Ký ức về anh',
-            stats ? `${stats.memories} điều Ginger nhớ về anh` : null,
+            'Ký ức của Gừng',
+            stats ? `Gừng đang nhớ ${stats.memories} điều` : null,
             'Xoá',
             () => setPage('memories'),
           )}
@@ -224,7 +280,7 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
             'Xoá',
           )}
           <View style={s.sep} />
-          {row('all', 'Xoá tất cả', 'Ginger sẽ không còn nhớ gì về anh', 'Xoá hết')}
+          {row('all', 'Xoá tất cả', 'Gừng sẽ quên hết mọi chuyện', 'Xoá hết')}
         </View>
         <Text style={s.note}>Dữ liệu đã xoá không khôi phục được.</Text>
         {error && <Text style={ui.error}>{error}</Text>}
@@ -273,5 +329,7 @@ const s = StyleSheet.create({
   memDel: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   memDelText: { fontSize: 16, color: C.muted },
   memLoading: { paddingVertical: 20 },
+  check: { width: 24, fontSize: 18, fontWeight: '700', color: C.listening, textAlign: 'center' },
+  checkOff: { opacity: 0 },
   memEmpty: { paddingVertical: 16, paddingHorizontal: 16, fontSize: 15, color: C.muted },
 });

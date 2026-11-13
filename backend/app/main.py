@@ -13,7 +13,7 @@ from livekit import api as lk_api
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
-from . import memory, voice
+from . import chat_models, memory, voice
 from .config import settings
 from .db import close_db, init_db, pool
 from .llm import FALLBACK_REPLY, stream_reply
@@ -26,8 +26,10 @@ log = logging.getLogger("tro-ly")
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(fastapi_app: FastAPI):
     await init_db()
+    # Lấy sẵn danh sách model để lượt chat đầu không phải chờ Models API.
+    fastapi_app.state.warm_models = asyncio.create_task(chat_models.available())
     yield
     await close_db()
 
@@ -129,7 +131,7 @@ async def voice_ws(ws: WebSocket):
         try:
             transcript = await session.result()
             if not transcript:
-                await emit({"type": "error", "message": "Em chưa nghe rõ, anh nói lại nhé."})
+                await emit({"type": "error", "message": "Gừng chưa nghe rõ, nói lại giúp Gừng nhé."})
                 return
             await emit({"type": "transcript", "text": transcript})
 
@@ -374,6 +376,28 @@ async def remove_memory(memory_id: int):
     if not await memory.delete_memory(memory_id):
         raise HTTPException(status_code=404, detail="Không tìm thấy")
     return {"deleted": memory_id}
+
+
+class SettingsUpdate(BaseModel):
+    model: str
+
+
+@app.get("/settings", dependencies=auth)
+async def get_settings():
+    """Dòng model đang chọn + bản mới nhất của từng dòng (để app hiện tên, vd. "Claude Opus 5.5")."""
+    models = await chat_models.available()
+    return {
+        "model": await chat_models.get_family(),
+        "models": [{"family": m.family, "name": m.name} for m in models.values()],
+    }
+
+
+@app.put("/settings", dependencies=auth)
+async def update_settings(req: SettingsUpdate):
+    if req.model not in chat_models.FAMILIES:
+        raise HTTPException(status_code=422, detail="Model không hợp lệ")
+    await chat_models.set_family(req.model)
+    return {"model": req.model}
 
 
 # Bản web của app (`npx expo export -p web` → app/dist). Phục vụ cùng địa chỉ với API để

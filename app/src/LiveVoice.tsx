@@ -176,7 +176,7 @@ function Conversation({
   // Agent mãi không vào (agent chưa chạy, mạng lỗi) thì báo lỗi thay vì chờ vô hạn.
   useEffect(() => {
     if (agent) return;
-    const t = setTimeout(() => onFail('Ginger chưa vào được, anh thử lại nhé'), 15000);
+    const t = setTimeout(() => onFail('Gừng chưa vào được, thử lại nhé'), 15000);
     return () => clearTimeout(t);
   }, [agent, onFail]);
 

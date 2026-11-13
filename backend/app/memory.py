@@ -12,6 +12,7 @@ import logging
 import re
 from uuid import UUID
 
+from . import chat_models
 from .config import settings
 from .db import pool
 from .llm import TZ, PromptContext, complete, embed
@@ -149,6 +150,10 @@ async def search_memories(query: str) -> list[dict]:
     return [r for r in rows if r["similarity"] >= settings.memory_min_similarity]
 
 
+# Cách người dùng muốn được gọi: ghi theo câu cố định để chỉ giữ lần dặn sau cùng
+# (hai câu "gọi là anh" / "gọi là chị" chưa chắc đủ giống nhau để tự ghi đè theo vector).
+ADDRESS_PREFIX = "Người dùng muốn được gọi là"
+
 EXTRACT_PROMPT = """Bạn là bộ phận ghi nhớ của một trợ lý ảo cá nhân.
 Đọc đoạn hội thoại và liệt kê những sự thật BỀN VỮNG về người dùng, đáng nhớ cho
 các cuộc trò chuyện sau: thông tin cá nhân, người thân, công việc, dự án,
@@ -159,6 +164,9 @@ trong hôm nay, hay suy đoán mà người dùng không nói ra.
 
 Mỗi sự thật là một câu ngắn tiếng Việt, ngôi thứ ba ("Người dùng ...").
 Nếu người dùng sửa lại thông tin cũ, ghi phiên bản mới.
+
+Nếu người dùng dặn trợ lý (tên là Gừng) gọi mình thế nào, ghi đúng một câu dạng
+"{address_prefix} <cách gọi>", ví dụ "{address_prefix} chị".
 
 Ký ức đã có (để tránh trùng lặp):
 {existing}
@@ -177,14 +185,17 @@ async def extract_memories(conversation_id: UUID, user_text: str, assistant_text
     ])
     related = await search_memories(user_text)
     existing = "\n".join(f"- {m['content']}" for m in related) or "(chưa có)"
-    raw = await complete(
-        EXTRACT_PROMPT.format(existing=existing, transcript=transcript), max_tokens=600
+    prompt = EXTRACT_PROMPT.format(
+        existing=existing, transcript=transcript, address_prefix=ADDRESS_PREFIX
     )
+    raw = await complete(prompt, max_tokens=600)
     facts = _parse_json_list(raw)
     if not facts:
         return
     vectors = await embed(facts, input_type="document")
     async with pool.connection() as conn:
+        if any(f.startswith(ADDRESS_PREFIX) for f in facts):
+            await conn.execute("DELETE FROM memories WHERE content LIKE %s", (ADDRESS_PREFIX + "%",))
         for fact, vec in zip(facts, vectors):
             nearest = await (await conn.execute(
                 "SELECT id, 1 - (embedding <=> %s) AS similarity FROM memories "
@@ -246,10 +257,11 @@ async def data_stats() -> dict:
 async def build_context(conversation_id: UUID, user_text: str) -> tuple[PromptContext, list[dict]]:
     """Trả về (ký ức + tóm tắt để đưa vào prompt, lịch sử gần đây)."""
     # Chạy song song: tìm ký ức (gọi Voyage) là bước chậm nhất.
-    memories, summaries, messages = await asyncio.gather(
+    memories, summaries, messages, model = await asyncio.gather(
         search_memories(user_text),
         recent_summaries(exclude=conversation_id),
         history_window(conversation_id),
+        chat_models.current(),
     )
 
     return PromptContext(
@@ -257,6 +269,7 @@ async def build_context(conversation_id: UUID, user_text: str) -> tuple[PromptCo
         summaries="\n".join(
             f"- ({s['updated_at'].astimezone(TZ):%d/%m/%Y}) {s['summary']}" for s in summaries
         ),
+        model=model,
     ), messages
 
 

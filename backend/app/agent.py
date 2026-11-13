@@ -34,7 +34,7 @@ from livekit.agents import (
 )
 from livekit.plugins import silero, soniox
 
-from . import memory
+from . import chat_models, memory
 from .config import settings
 from .db import init_db
 from .llm import FALLBACK_REPLY, stream_reply
@@ -108,6 +108,8 @@ server = AgentServer(setup_fnc=prewarm, num_idle_processes=1)
 @server.rtc_session(agent_name=AGENT_NAME)
 async def entrypoint(ctx: JobContext) -> None:
     await _ensure_db()
+    # Mỗi phiên là một process mới: lấy sẵn danh sách model trong lúc chờ anh nói câu đầu.
+    _spawn(chat_models.available())
     meta = json.loads(ctx.job.metadata or "{}")
     conv_id = await memory.get_or_create_conversation(
         UUID(meta["conversation_id"]) if meta.get("conversation_id") else None
