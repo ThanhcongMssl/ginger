@@ -12,6 +12,11 @@
       "bitcode": false,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
+      },
+      "entitlements": {
+        "keychain-access-groups": [
+          "$(AppIdentifierPrefix)si.moca.troly.shared"
+        ]
       }
     },
     "android": {
@@ -43,7 +48,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "Trợ lý cần dùng micro để nghe anh nói.",
+          "microphonePermission": "Gừng cần dùng micro để nghe bạn nói.",
           "recordAudioAndroid": true
         }
       ],

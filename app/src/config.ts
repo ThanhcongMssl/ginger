@@ -3,6 +3,11 @@
  * - Dev build (JS chạy từ Metro trên máy): cả hai lấy từ app/.env.
  * - Bản preview/App Store (JS đóng gói trên EAS): API_URL lấy từ biến môi trường của EAS;
  *   token không đóng gói vào app, anh nhập một lần (TokenGate), lưu trong Keychain.
+ *
+ * Mã thiết bị (tài khoản, xem backend/app/accounts.py): UUID ngẫu nhiên sinh lần đầu mở app,
+ * lưu Keychain. app.json khai báo nhóm Keychain chung `si.moca.troly.shared` cho cả Ginger và
+ * Ginger Dev; SecureStore không ghi access group nên item rơi vào nhóm đầu tiên (nhóm chung),
+ * hai app trên cùng máy dùng chung một tài khoản. Gỡ app cài lại vẫn giữ (Keychain còn).
  */
 export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -34,4 +39,31 @@ export function setAppToken(value: string): void {
   } catch {
     // Không có Keychain: chỉ nhớ token tới khi tắt app.
   }
+}
+
+const DEVICE_KEY = 'ginger.deviceId';
+let deviceId = '';
+
+/** Đọc (hoặc sinh lần đầu) mã thiết bị. Gọi một lần lúc mở app, trước mọi request. */
+export async function loadDeviceId(): Promise<void> {
+  if (deviceId) return;
+  try {
+    const store = secureStore();
+    const saved = await store.getItemAsync(DEVICE_KEY);
+    if (saved) {
+      deviceId = saved;
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const id = (require('expo-crypto') as typeof import('expo-crypto')).randomUUID();
+    await store.setItemAsync(DEVICE_KEY, id);
+    deviceId = id;
+  } catch {
+    // App cũ thiếu module native (expo-crypto / SecureStore): để trống, TokenGate báo cài bản mới.
+    deviceId = '';
+  }
+}
+
+export function getDeviceId(): string {
+  return deviceId;
 }

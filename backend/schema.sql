@@ -2,6 +2,26 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+-- Tài khoản. Hiện mỗi thiết bị tự có một tài khoản (bảng devices); sau này đăng nhập Apple
+-- thì nhiều thiết bị trỏ về cùng một tài khoản để dùng chung bộ nhớ.
+CREATE TABLE IF NOT EXISTS users (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    -- Dòng model Claude để trò chuyện (chat_models.py); NULL = mặc định.
+    chat_model  TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Mã thiết bị (UUID ngẫu nhiên app tự sinh, lưu Keychain/localStorage) → tài khoản.
+CREATE TABLE IF NOT EXISTS devices (
+    id            TEXT PRIMARY KEY,
+    user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Bảng cài đặt chung cũ, nay cài đặt nằm trong users.
+DROP TABLE IF EXISTS settings;
+
 -- Mỗi phiên trò chuyện. `summary` = tóm tắt do LLM viết (bộ nhớ tầng 2).
 CREATE TABLE IF NOT EXISTS conversations (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -34,8 +54,9 @@ CREATE TABLE IF NOT EXISTS memories (
 CREATE INDEX IF NOT EXISTS memories_embedding_idx
     ON memories USING hnsw (embedding vector_cosine_ops);
 
--- Cài đặt chỉnh trong app, dạng khoá → giá trị (vd. chat_model = dòng model Claude để trò chuyện).
-CREATE TABLE IF NOT EXISTS settings (
-    key    TEXT PRIMARY KEY,
-    value  TEXT NOT NULL
-);
+-- Dữ liệu theo tài khoản. Dữ liệu có từ trước khi chia tài khoản có user_id NULL: không ai
+-- thấy cho tới khi gán tay cho một tài khoản.
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS conversations_user_idx ON conversations (user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS memories_user_idx ON memories (user_id, id);

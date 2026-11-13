@@ -1,8 +1,12 @@
 import { fetch } from 'expo/fetch';
 
-import { API_URL, getAppToken } from './config';
+import { API_URL, getAppToken, getDeviceId } from './config';
 
-const authHeaders = (token = getAppToken()) => ({ Authorization: `Bearer ${token}` });
+const authHeaders = (token = getAppToken()) => ({
+  Authorization: `Bearer ${token}`,
+  // Tài khoản theo thiết bị (backend/app/accounts.py).
+  'X-Device-Id': getDeviceId(),
+});
 
 export type Memory = { id: number; content: string; updated_at: string };
 

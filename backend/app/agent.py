@@ -55,9 +55,10 @@ class _NoLLM(llm.LLM):
 
 
 class Ginger(Agent):
-    def __init__(self, conversation_id: UUID) -> None:
+    def __init__(self, user_id: UUID, conversation_id: UUID) -> None:
         # Persona nằm trong llm.system_prompt, không dùng instructions của LiveKit.
         super().__init__(instructions="")
+        self.user_id = user_id
         self.conversation_id = conversation_id
         self.last_user_text = ""
 
@@ -70,7 +71,9 @@ class Ginger(Agent):
         # Lịch sử lấy từ DB (không dùng chat_ctx của LiveKit) để prompt giống hệt các
         # lượt trước → prompt cache của Claude trúng.
         t0 = time.monotonic()
-        context, messages = await memory.build_context(self.conversation_id, self.last_user_text)
+        context, messages = await memory.build_context(
+            self.user_id, self.conversation_id, self.last_user_text
+        )
         t_ctx = time.monotonic()
         t_first = None
         try:
@@ -111,10 +114,12 @@ async def entrypoint(ctx: JobContext) -> None:
     # Mỗi phiên là một process mới: lấy sẵn danh sách model trong lúc chờ anh nói câu đầu.
     _spawn(chat_models.available())
     meta = json.loads(ctx.job.metadata or "{}")
+    # Backend (/livekit/token) đã xác định tài khoản theo mã thiết bị và ghi vào metadata.
+    user_id = UUID(meta["user_id"])
     conv_id = await memory.get_or_create_conversation(
-        UUID(meta["conversation_id"]) if meta.get("conversation_id") else None
+        user_id, UUID(meta["conversation_id"]) if meta.get("conversation_id") else None
     )
-    agent = Ginger(conv_id)
+    agent = Ginger(user_id, conv_id)
 
     session = AgentSession(
         stt=soniox.STT(params=soniox.STTOptions(
@@ -163,7 +168,7 @@ async def entrypoint(ctx: JobContext) -> None:
             return
         # Bị ngắt lời thì LiveKit chỉ giữ phần đã kịp đọc.
         text = (item.text_content or "").strip() or "…"
-        _spawn(memory.finish_turn(conv_id, agent.last_user_text, text))
+        _spawn(memory.finish_turn(user_id, conv_id, agent.last_user_text, text))
         # Gửi ID cuộc trò chuyện để lần sau app nối tiếp đúng cuộc này.
         _spawn(ctx.room.local_participant.set_attributes({"conversation_id": str(conv_id)}))
 

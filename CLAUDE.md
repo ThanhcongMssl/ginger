@@ -24,12 +24,31 @@ App mobile trợ lý ảo dựa trên AI:
 - **Backend:** FastAPI + Postgres/pgvector. App không chứa API key của nhà cung cấp nào;
   app gọi backend bằng `APP_TOKEN` tự đặt.
 - Câu trả lời viết theo văn nói, không markdown, để đưa thẳng vào TTS.
+- Không hỏi ngược lại người dùng, vì khi nói chuyện bằng giọng mỗi câu hỏi tốn thêm một lượt.
+  - Người dùng kể chuyện thì Gừng chỉ đáp một câu ngắn.
+  - Gừng chỉ hỏi lại khi yêu cầu thiếu thông tin tới mức không làm được.
+  - Đo bằng 8 câu kể chuyện / câu hỏi, prompt cũ: 5/7 câu kể chuyện bị hỏi ngược; prompt mới: 0/7.
+  - Gừng chưa đặt được nhắc việc hay báo thức, được nhờ thì nói thật là chưa làm được.
 - Xưng hô (`PERSONA` trong backend/app/llm.py): trợ lý tự xưng "Gừng", mặc định gọi người
   dùng là "anh". Không có màn cài đặt: người dùng nói "gọi tôi là chị/bạn…" thì Gừng đổi ngay,
   và ký ức lưu thành câu cố định "Người dùng muốn được gọi là …"
   (`ADDRESS_PREFIX` trong memory.py). Mỗi lần dặn mới thì xoá câu cũ, nên chỉ giữ lần dặn sau cùng.
   Câu báo lỗi cố định không gọi "anh". Chữ trong app gọi trợ lý là "Gừng" và không gọi "anh";
   tên app và logo vẫn là "Ginger".
+
+## Tài khoản theo thiết bị (backend/app/accounts.py)
+- App sinh một UUID ngẫu nhiên lần đầu mở app. Native lưu nó trong Keychain, web lưu trong localStorage.
+  App gửi kèm UUID này ở header `X-Device-Id` trong mọi request, vẫn cùng `APP_TOKEN` như cũ.
+  Thiết bị lạ gọi tới lần đầu thì backend tạo tài khoản mới (bảng `users`, `devices`).
+- Mọi dữ liệu theo tài khoản (`conversations.user_id`, `memories.user_id`, `users.chat_model`):
+  - mọi truy vấn đều lọc theo `user_id`;
+  - agent nhận `user_id` trong metadata dispatch từ `/livekit/token`.
+- Ginger và Ginger Dev dùng chung nhóm Keychain `$(AppIdentifierPrefix)si.moca.troly.shared`
+  (entitlement trong app.json). SecureStore không ghi access group, nên item rơi vào nhóm này.
+  Vì vậy cùng một iPhone thì hai app là một tài khoản, và gỡ app cài lại vẫn giữ tài khoản.
+- Dữ liệu có từ trước khi chia tài khoản có `user_id` NULL: không ai thấy cho tới khi gán tay.
+  Settings hiện 8 ký tự đầu của mã thiết bị để tra trong bảng `devices`.
+- Sau này đăng nhập Apple (iCloud): gắn nhiều `devices` vào cùng một `users.id`.
 
 ## Bộ nhớ 3 tầng (backend/app/memory.py)
 1. Ngắn hạn: 20–29 tin gần nhất của cuộc trò chuyện hiện tại (cắt theo bậc 10 tin để prompt cache trúng)

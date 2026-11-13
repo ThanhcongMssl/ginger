@@ -13,7 +13,7 @@ from livekit import api as lk_api
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
-from . import chat_models, memory, voice
+from . import accounts, chat_models, memory, voice
 from .config import settings
 from .db import close_db, init_db, pool
 from .llm import FALLBACK_REPLY, stream_reply
@@ -45,6 +45,17 @@ def require_token(authorization: str = Header(default="")) -> None:
 auth = [Depends(require_token)]
 
 
+async def current_user(x_device_id: str | None = Header(default=None)) -> UUID:
+    """Tài khoản của thiết bị gửi request (xem accounts.py)."""
+    device_id = accounts.parse_device_id(x_device_id)
+    if not device_id:
+        raise HTTPException(status_code=400, detail="Thiếu mã thiết bị")
+    return await accounts.user_for_device(device_id)
+
+
+User = Depends(current_user)
+
+
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     conversation_id: UUID | None = None
@@ -56,11 +67,11 @@ async def health():
 
 
 @app.post("/chat", dependencies=auth)
-async def chat(req: ChatRequest):
+async def chat(req: ChatRequest, user_id: UUID = User):
     """Trả lời dạng stream text thuần. ID cuộc trò chuyện nằm ở header X-Conversation-Id."""
-    conv_id = await memory.get_or_create_conversation(req.conversation_id)
+    conv_id = await memory.get_or_create_conversation(user_id, req.conversation_id)
     await memory.add_message(conv_id, "user", req.message)
-    context, messages = await memory.build_context(conv_id, req.message)
+    context, messages = await memory.build_context(user_id, conv_id, req.message)
 
     reply: list[str] = []
 
@@ -77,7 +88,7 @@ async def chat(req: ChatRequest):
     async def after_reply():
         # App bấm dừng (ngắt kết nối): Starlette huỷ stream nhưng vẫn chạy bước này, nên chỉ
         # lưu phần đã kịp trả lời (giống khi bị ngắt lời bằng giọng).
-        await finish_turn(conv_id, req.message, "".join(reply).strip() or "…")
+        await finish_turn(user_id, conv_id, req.message, "".join(reply).strip() or "…")
 
     return StreamingResponse(
         generate(),
@@ -104,6 +115,11 @@ async def voice_ws(ws: WebSocket):
     if ws.headers.get("authorization") != f"Bearer {settings.app_token}":
         await ws.close(code=4401)
         return
+    device_id = accounts.parse_device_id(ws.headers.get("x-device-id"))
+    if not device_id:
+        await ws.close(code=4400)
+        return
+    user_id = await accounts.user_for_device(device_id)
     await ws.accept()
 
     send_lock = asyncio.Lock()
@@ -135,10 +151,10 @@ async def voice_ws(ws: WebSocket):
                 return
             await emit({"type": "transcript", "text": transcript})
 
-            conv_id = await memory.get_or_create_conversation(conversation_id)
+            conv_id = await memory.get_or_create_conversation(user_id, conversation_id)
             conversation_id = conv_id
             await memory.add_message(conv_id, "user", transcript)
-            context, messages = await memory.build_context(conv_id, transcript)
+            context, messages = await memory.build_context(user_id, conv_id, transcript)
 
             # Đọc từng câu ngay khi Claude viết xong câu đó, không chờ cả câu trả lời.
             splitter = voice.SentenceSplitter()
@@ -174,7 +190,7 @@ async def voice_ws(ws: WebSocket):
             reply = "".join(parts).strip()
 
             saved = True
-            voice.spawn(finish_turn(conv_id, transcript, reply))
+            voice.spawn(finish_turn(user_id, conv_id, transcript, reply))
             await emit({
                 "type": "reply",
                 "text": reply,
@@ -187,7 +203,7 @@ async def voice_ws(ws: WebSocket):
             # Bị ngắt lời / mất kết nối giữa chừng: vẫn lưu phần đã trả lời để lịch sử
             # luân phiên user/assistant đúng như Claude yêu cầu.
             if conv_id and not saved:
-                voice.spawn(finish_turn(conv_id, transcript, "".join(parts).strip() or "…"))
+                voice.spawn(finish_turn(user_id, conv_id, transcript, "".join(parts).strip() or "…"))
             raise
         except Exception as e:
             log.exception("Lỗi ở lượt %s", turn)
@@ -307,7 +323,7 @@ class LiveKitTokenRequest(BaseModel):
 
 
 @app.post("/livekit/token", dependencies=auth)
-async def livekit_token(req: LiveKitTokenRequest):
+async def livekit_token(req: LiveKitTokenRequest, user_id: UUID = User):
     """Token vào một phòng LiveKit mới, kèm lệnh gọi agent Ginger vào phòng.
 
     Mỗi lần bấm nói chuyện là một phòng riêng; ID cuộc trò chuyện đi theo metadata
@@ -316,7 +332,10 @@ async def livekit_token(req: LiveKitTokenRequest):
     if not (settings.livekit_url and settings.livekit_api_key and settings.livekit_api_secret):
         raise HTTPException(status_code=503, detail="Chưa cấu hình LiveKit")
     room = f"ginger-{uuid4().hex[:12]}"
-    metadata = json.dumps({"conversation_id": str(req.conversation_id) if req.conversation_id else None})
+    metadata = json.dumps({
+        "user_id": str(user_id),
+        "conversation_id": str(req.conversation_id) if req.conversation_id else None,
+    })
     token = (
         lk_api.AccessToken(settings.livekit_api_key, settings.livekit_api_secret)
         .with_identity("user")
@@ -332,48 +351,43 @@ async def livekit_token(req: LiveKitTokenRequest):
 
 
 @app.get("/conversations", dependencies=auth)
-async def list_conversations(limit: int = 30):
+async def list_conversations(limit: int = 30, user_id: UUID = User):
     async with pool.connection() as conn:
         return await (await conn.execute(
             "SELECT id, title, summary, updated_at FROM conversations "
-            "ORDER BY updated_at DESC LIMIT %s",
-            (limit,),
+            "WHERE user_id = %s ORDER BY updated_at DESC LIMIT %s",
+            (user_id, limit),
         )).fetchall()
 
 
 @app.get("/conversations/{conversation_id}/messages", dependencies=auth)
-async def get_messages(conversation_id: UUID):
-    async with pool.connection() as conn:
-        return await (await conn.execute(
-            "SELECT role, content, created_at FROM messages "
-            "WHERE conversation_id = %s ORDER BY id",
-            (conversation_id,),
-        )).fetchall()
+async def get_messages(conversation_id: UUID, user_id: UUID = User):
+    return await memory.get_messages(user_id, conversation_id)
 
 
 @app.get("/data/stats", dependencies=auth)
-async def get_data_stats():
-    return await memory.data_stats()
+async def get_data_stats(user_id: UUID = User):
+    return await memory.data_stats(user_id)
 
 
 @app.delete("/conversations", dependencies=auth)
-async def clear_conversations():
-    return {"deleted": await memory.delete_all_conversations()}
+async def clear_conversations(user_id: UUID = User):
+    return {"deleted": await memory.delete_all_conversations(user_id)}
 
 
 @app.delete("/memories", dependencies=auth)
-async def clear_memories():
-    return {"deleted": await memory.delete_all_memories()}
+async def clear_memories(user_id: UUID = User):
+    return {"deleted": await memory.delete_all_memories(user_id)}
 
 
 @app.get("/memories", dependencies=auth)
-async def get_memories():
-    return await memory.list_memories()
+async def get_memories(user_id: UUID = User):
+    return await memory.list_memories(user_id)
 
 
 @app.delete("/memories/{memory_id}", dependencies=auth)
-async def remove_memory(memory_id: int):
-    if not await memory.delete_memory(memory_id):
+async def remove_memory(memory_id: int, user_id: UUID = User):
+    if not await memory.delete_memory(user_id, memory_id):
         raise HTTPException(status_code=404, detail="Không tìm thấy")
     return {"deleted": memory_id}
 
@@ -383,20 +397,20 @@ class SettingsUpdate(BaseModel):
 
 
 @app.get("/settings", dependencies=auth)
-async def get_settings():
+async def get_settings(user_id: UUID = User):
     """Dòng model đang chọn + bản mới nhất của từng dòng (để app hiện tên, vd. "Claude Opus 5.5")."""
     models = await chat_models.available()
     return {
-        "model": await chat_models.get_family(),
+        "model": await chat_models.get_family(user_id),
         "models": [{"family": m.family, "name": m.name} for m in models.values()],
     }
 
 
 @app.put("/settings", dependencies=auth)
-async def update_settings(req: SettingsUpdate):
+async def update_settings(req: SettingsUpdate, user_id: UUID = User):
     if req.model not in chat_models.FAMILIES:
         raise HTTPException(status_code=422, detail="Model không hợp lệ")
-    await chat_models.set_family(req.model)
+    await chat_models.set_family(user_id, req.model)
     return {"model": req.model}
 
 

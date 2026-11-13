@@ -19,6 +19,7 @@ import {
   type Memory,
   type ModelFamily,
 } from './api';
+import { getDeviceId } from './config';
 import { BackIcon, C, GearIcon, styles as ui } from './ui';
 
 type Props = {
@@ -284,6 +285,8 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
         </View>
         <Text style={s.note}>Dữ liệu đã xoá không khôi phục được.</Text>
         {error && <Text style={ui.error}>{error}</Text>}
+        {/* Mỗi máy một tài khoản; mã này để tra tài khoản trong DB khi cần. */}
+        <Text style={s.deviceId}>Mã thiết bị: {getDeviceId().slice(0, 8)}</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -329,6 +332,7 @@ const s = StyleSheet.create({
   memDel: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   memDelText: { fontSize: 16, color: C.muted },
   memLoading: { paddingVertical: 20 },
+  deviceId: { fontSize: 12, color: C.muted, textAlign: 'center', marginTop: 24 },
   check: { width: 24, fontSize: 18, fontWeight: '700', color: C.listening, textAlign: 'center' },
   checkOff: { opacity: 0 },
   memEmpty: { paddingVertical: 16, paddingHorizontal: 16, fontSize: 15, color: C.muted },

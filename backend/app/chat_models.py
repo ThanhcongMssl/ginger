@@ -3,12 +3,14 @@ không chọn phiên bản. Bản mới nhất của mỗi dòng lấy từ Mode
 thinking cũng theo khả năng model báo về vì mỗi bản một kiểu (Sonnet 5.5 chỉ nhận
 `between_tools`, Haiku 5.5 nhận `disabled`, Opus 5.5 không tắt được).
 
-Agent chạy mỗi phiên trong một process riêng nên lựa chọn lưu ở DB (bảng `settings`).
+Lựa chọn lưu theo tài khoản ở DB (`users.chat_model`): agent chạy mỗi phiên trong một
+process riêng.
 """
 
 import logging
 import time
 from dataclasses import dataclass
+from uuid import UUID
 
 from .db import pool
 from .llm import claude
@@ -17,7 +19,6 @@ log = logging.getLogger(__name__)
 
 FAMILIES = ("haiku", "sonnet", "opus")
 DEFAULT_FAMILY = "sonnet"
-_KEY = "chat_model"
 _TTL = 3600
 # Models API lỗi thì dùng các bản này; không gửi thinking (adaptive, bản nào cũng nhận).
 _FALLBACK = {"haiku": "claude-haiku-5-5", "sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5"}
@@ -78,20 +79,18 @@ async def available() -> dict[str, ChatModel]:
     }
 
 
-async def get_family() -> str:
+async def get_family(user_id: UUID) -> str:
     async with pool.connection() as conn:
-        row = await (await conn.execute("SELECT value FROM settings WHERE key = %s", (_KEY,))).fetchone()
-    return row["value"] if row and row["value"] in FAMILIES else DEFAULT_FAMILY
+        row = await (await conn.execute(
+            "SELECT chat_model FROM users WHERE id = %s", (user_id,)
+        )).fetchone()
+    return row["chat_model"] if row and row["chat_model"] in FAMILIES else DEFAULT_FAMILY
 
 
-async def set_family(family: str) -> None:
+async def set_family(user_id: UUID, family: str) -> None:
     async with pool.connection() as conn:
-        await conn.execute(
-            "INSERT INTO settings (key, value) VALUES (%s, %s) "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-            (_KEY, family),
-        )
+        await conn.execute("UPDATE users SET chat_model = %s WHERE id = %s", (family, user_id))
 
 
-async def current() -> ChatModel:
-    return (await available())[await get_family()]
+async def current(user_id: UUID) -> ChatModel:
+    return (await available())[await get_family(user_id)]

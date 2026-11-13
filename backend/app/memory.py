@@ -22,18 +22,30 @@ log = logging.getLogger(__name__)
 
 # ---------- Tầng 1: tin nhắn ----------
 
-async def get_or_create_conversation(conversation_id: UUID | None) -> UUID:
+async def get_or_create_conversation(user_id: UUID, conversation_id: UUID | None) -> UUID:
+    """Cuộc trò chuyện của đúng tài khoản này; ID lạ hoặc của người khác thì mở cuộc mới."""
     async with pool.connection() as conn:
         if conversation_id:
             row = await (await conn.execute(
-                "SELECT id FROM conversations WHERE id = %s", (conversation_id,)
+                "SELECT id FROM conversations WHERE id = %s AND user_id = %s",
+                (conversation_id, user_id),
             )).fetchone()
             if row:
                 return row["id"]
         row = await (await conn.execute(
-            "INSERT INTO conversations DEFAULT VALUES RETURNING id"
+            "INSERT INTO conversations (user_id) VALUES (%s) RETURNING id", (user_id,)
         )).fetchone()
         return row["id"]
+
+
+async def get_messages(user_id: UUID, conversation_id: UUID) -> list[dict]:
+    async with pool.connection() as conn:
+        return await (await conn.execute(
+            "SELECT m.role, m.content, m.created_at FROM messages m "
+            "JOIN conversations c ON c.id = m.conversation_id "
+            "WHERE m.conversation_id = %s AND c.user_id = %s ORDER BY m.id",
+            (conversation_id, user_id),
+        )).fetchall()
 
 
 async def add_message(conversation_id: UUID, role: str, content: str) -> None:
@@ -90,12 +102,13 @@ async def recent_messages(conversation_id: UUID, limit: int) -> list[dict]:
 
 # ---------- Tầng 2: tóm tắt ----------
 
-async def recent_summaries(exclude: UUID, limit: int = 3) -> list[dict]:
+async def recent_summaries(user_id: UUID, exclude: UUID, limit: int = 3) -> list[dict]:
     async with pool.connection() as conn:
         return await (await conn.execute(
             "SELECT summary, updated_at FROM conversations "
-            "WHERE id <> %s AND summary IS NOT NULL ORDER BY updated_at DESC LIMIT %s",
-            (exclude, limit),
+            "WHERE user_id = %s AND id <> %s AND summary IS NOT NULL "
+            "ORDER BY updated_at DESC LIMIT %s",
+            (user_id, exclude, limit),
         )).fetchall()
 
 
@@ -129,14 +142,14 @@ async def maybe_summarize(conversation_id: UUID) -> None:
 
 # ---------- Tầng 3: ký ức dài hạn ----------
 
-async def search_memories(query: str) -> list[dict]:
+async def search_memories(user_id: UUID, query: str) -> list[dict]:
     # Còn ít ký ức thì đưa hết vào prompt, khỏi gọi Voyage: embedding câu hỏi mất 0,4–1,2s
     # ngay trước khi gọi Claude (chặng chậm thứ hai của mỗi lượt nói). Nhiều hơn mức này
     # mới tìm theo vector.
     async with pool.connection() as conn:
         rows = await (await conn.execute(
-            "SELECT id, content FROM memories ORDER BY id LIMIT %s",
-            (settings.memory_inline_max + 1,),
+            "SELECT id, content FROM memories WHERE user_id = %s ORDER BY id LIMIT %s",
+            (user_id, settings.memory_inline_max + 1),
         )).fetchall()
     if len(rows) <= settings.memory_inline_max:
         return rows
@@ -144,8 +157,8 @@ async def search_memories(query: str) -> list[dict]:
     async with pool.connection() as conn:
         rows = await (await conn.execute(
             "SELECT id, content, 1 - (embedding <=> %s) AS similarity "
-            "FROM memories ORDER BY embedding <=> %s LIMIT %s",
-            (vec, vec, settings.memory_top_k),
+            "FROM memories WHERE user_id = %s ORDER BY embedding <=> %s LIMIT %s",
+            (vec, user_id, vec, settings.memory_top_k),
         )).fetchall()
     return [r for r in rows if r["similarity"] >= settings.memory_min_similarity]
 
@@ -178,12 +191,14 @@ Trả về DUY NHẤT một mảng JSON các chuỗi, ví dụ ["Người dùng 
 Không có gì đáng nhớ thì trả về []."""
 
 
-async def extract_memories(conversation_id: UUID, user_text: str, assistant_text: str) -> None:
+async def extract_memories(
+    user_id: UUID, conversation_id: UUID, user_text: str, assistant_text: str
+) -> None:
     transcript = _transcript([
         {"role": "user", "content": user_text},
         {"role": "assistant", "content": assistant_text},
     ])
-    related = await search_memories(user_text)
+    related = await search_memories(user_id, user_text)
     existing = "\n".join(f"- {m['content']}" for m in related) or "(chưa có)"
     prompt = EXTRACT_PROMPT.format(
         existing=existing, transcript=transcript, address_prefix=ADDRESS_PREFIX
@@ -195,12 +210,15 @@ async def extract_memories(conversation_id: UUID, user_text: str, assistant_text
     vectors = await embed(facts, input_type="document")
     async with pool.connection() as conn:
         if any(f.startswith(ADDRESS_PREFIX) for f in facts):
-            await conn.execute("DELETE FROM memories WHERE content LIKE %s", (ADDRESS_PREFIX + "%",))
+            await conn.execute(
+                "DELETE FROM memories WHERE user_id = %s AND content LIKE %s",
+                (user_id, ADDRESS_PREFIX + "%"),
+            )
         for fact, vec in zip(facts, vectors):
             nearest = await (await conn.execute(
                 "SELECT id, 1 - (embedding <=> %s) AS similarity FROM memories "
-                "ORDER BY embedding <=> %s LIMIT 1",
-                (vec, vec),
+                "WHERE user_id = %s ORDER BY embedding <=> %s LIMIT 1",
+                (vec, user_id, vec),
             )).fetchone()
             if nearest and nearest["similarity"] >= settings.memory_dedupe_similarity:
                 # Gần như trùng → thay bằng phiên bản mới nhất (xử lý cả trường hợp sửa sai).
@@ -211,57 +229,64 @@ async def extract_memories(conversation_id: UUID, user_text: str, assistant_text
                 )
             else:
                 await conn.execute(
-                    "INSERT INTO memories (content, embedding, source_conversation_id) "
-                    "VALUES (%s, %s, %s)",
-                    (fact, vec, conversation_id),
+                    "INSERT INTO memories (user_id, content, embedding, source_conversation_id) "
+                    "VALUES (%s, %s, %s, %s)",
+                    (user_id, fact, vec, conversation_id),
                 )
     log.info("Đã lưu %d ký ức", len(facts))
 
 
-async def list_memories() -> list[dict]:
+async def list_memories(user_id: UUID) -> list[dict]:
     async with pool.connection() as conn:
         return await (await conn.execute(
-            "SELECT id, content, created_at, updated_at FROM memories ORDER BY updated_at DESC"
+            "SELECT id, content, created_at, updated_at FROM memories WHERE user_id = %s "
+            "ORDER BY updated_at DESC",
+            (user_id,),
         )).fetchall()
 
 
-async def delete_memory(memory_id: int) -> bool:
+async def delete_memory(user_id: UUID, memory_id: int) -> bool:
     async with pool.connection() as conn:
-        cur = await conn.execute("DELETE FROM memories WHERE id = %s", (memory_id,))
+        cur = await conn.execute(
+            "DELETE FROM memories WHERE id = %s AND user_id = %s", (memory_id, user_id)
+        )
         return cur.rowcount > 0
 
 
-async def delete_all_memories() -> int:
+async def delete_all_memories(user_id: UUID) -> int:
     async with pool.connection() as conn:
-        cur = await conn.execute("DELETE FROM memories")
+        cur = await conn.execute("DELETE FROM memories WHERE user_id = %s", (user_id,))
         return cur.rowcount
 
 
-async def delete_all_conversations() -> int:
+async def delete_all_conversations(user_id: UUID) -> int:
     """Xoá mọi cuộc trò chuyện (tin nhắn và tóm tắt xoá theo nhờ ON DELETE CASCADE)."""
     async with pool.connection() as conn:
-        cur = await conn.execute("DELETE FROM conversations")
+        cur = await conn.execute("DELETE FROM conversations WHERE user_id = %s", (user_id,))
         return cur.rowcount
 
 
-async def data_stats() -> dict:
+async def data_stats(user_id: UUID) -> dict:
     async with pool.connection() as conn:
         return await (await conn.execute(
-            "SELECT (SELECT count(*) FROM memories) AS memories, "
-            "(SELECT count(*) FROM conversations) AS conversations"
+            "SELECT (SELECT count(*) FROM memories WHERE user_id = %(u)s) AS memories, "
+            "(SELECT count(*) FROM conversations WHERE user_id = %(u)s) AS conversations",
+            {"u": user_id},
         )).fetchone()
 
 
 # ---------- Ghép ngữ cảnh ----------
 
-async def build_context(conversation_id: UUID, user_text: str) -> tuple[PromptContext, list[dict]]:
+async def build_context(
+    user_id: UUID, conversation_id: UUID, user_text: str
+) -> tuple[PromptContext, list[dict]]:
     """Trả về (ký ức + tóm tắt để đưa vào prompt, lịch sử gần đây)."""
     # Chạy song song: tìm ký ức (gọi Voyage) là bước chậm nhất.
     memories, summaries, messages, model = await asyncio.gather(
-        search_memories(user_text),
-        recent_summaries(exclude=conversation_id),
+        search_memories(user_id, user_text),
+        recent_summaries(user_id, exclude=conversation_id),
         history_window(conversation_id),
-        chat_models.current(),
+        chat_models.current(user_id),
     )
 
     return PromptContext(
@@ -275,11 +300,11 @@ async def build_context(conversation_id: UUID, user_text: str) -> tuple[PromptCo
 
 # ---------- Sau mỗi lượt ----------
 
-async def finish_turn(conversation_id: UUID, user_text: str, reply: str) -> None:
+async def finish_turn(user_id: UUID, conversation_id: UUID, user_text: str, reply: str) -> None:
     """Lưu câu trả lời rồi cập nhật bộ nhớ. Chạy nền sau khi đã trả lời xong."""
     await add_message(conversation_id, "assistant", reply)
     try:
-        await extract_memories(conversation_id, user_text, reply)
+        await extract_memories(user_id, conversation_id, user_text, reply)
         await maybe_summarize(conversation_id)
     except Exception:
         log.exception("Lỗi khi cập nhật bộ nhớ")
