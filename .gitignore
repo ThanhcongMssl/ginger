@@ -1,0 +1,15 @@
+# Bí mật: key nhà cung cấp, APP_TOKEN
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Node / Expo
+node_modules/
+.expo/
+
+.DS_Store
