@@ -17,6 +17,7 @@ Chạy (cần LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET trong .env):
 import asyncio
 import json
 import logging
+import time
 from uuid import UUID
 
 from livekit.agents import (
@@ -68,10 +69,18 @@ class Ginger(Agent):
     async def llm_node(self, chat_ctx: llm.ChatContext, tools: list, model_settings: ModelSettings):
         # Lịch sử lấy từ DB (không dùng chat_ctx của LiveKit) để prompt giống hệt các
         # lượt trước → prompt cache của Claude trúng.
+        t0 = time.monotonic()
         context, messages = await memory.build_context(self.conversation_id, self.last_user_text)
+        t_ctx = time.monotonic()
+        t_first = None
         try:
             async for chunk in stream_reply(context, messages):
+                t_first = t_first or time.monotonic()
                 yield chunk
+            log.info(
+                "Độ trễ LLM: ngữ cảnh %.2fs, chữ đầu +%.2fs, xong +%.2fs",
+                t_ctx - t0, (t_first or t_ctx) - t_ctx, time.monotonic() - t_ctx,
+            )
         except Exception:
             log.exception("Lỗi khi gọi LLM")
             yield FALLBACK_REPLY
@@ -134,14 +143,21 @@ async def entrypoint(ctx: JobContext) -> None:
             "interruption": {"mode": "vad", "min_duration": 0.4, "min_words": 1},
         },
         user_away_timeout=AWAY_TIMEOUT_SEC,
-        # Mặc định khoá ngắt lời 3s đầu mỗi câu trả lời để chờ khử vọng của máy ổn định.
-        aec_warmup_duration=1.0,
+        # Giữ mặc định aec_warmup_duration=3s: chỉ áp dụng MỘT lần mỗi phiên, tính từ câu trả lời
+        # đầu tiên (không phải mỗi câu). Lúc đó khử tiếng vọng của điện thoại chưa ổn định, tiếng
+        # Ginger vọng về agent trễ 1–2s; để 1s thì Ginger nghe nhầm chính mình thành lời anh nói.
     )
 
     @session.on("conversation_item_added")
     def _on_item(ev: ConversationItemAddedEvent) -> None:
         item = ev.item
-        if not isinstance(item, llm.ChatMessage) or item.role != "assistant":
+        if not isinstance(item, llm.ChatMessage):
+            return
+        # Độ trễ từng chặng do LiveKit đo (giây): xem mục "Độ trễ" trong CLAUDE.md.
+        m = {k: round(v, 2) for k, v in item.metrics.items() if k.endswith(("_delay", "_ttft", "_ttfs", "_ttfb"))}
+        if m:
+            log.info("Độ trễ %s: %s", item.role, m)
+        if item.role != "assistant":
             return
         # Bị ngắt lời thì LiveKit chỉ giữ phần đã kịp đọc.
         text = (item.text_content or "").strip() or "…"

@@ -26,7 +26,8 @@ App mobile trợ lý ảo dựa trên AI:
 2. Tóm tắt: mỗi cuộc có một bản tóm tắt, cập nhật sau mỗi 6 tin; đưa tóm tắt 3 cuộc gần nhất vào prompt
 3. Dài hạn: sau mỗi lượt, Haiku trích các sự thật về người dùng → embed → lưu vào
    bảng `memories`. Ký ức có cosine ≥ 0.88 với ký ức cũ thì ghi đè lên ký ức cũ.
-   Khi chat, lấy top 8 ký ức liên quan.
+   Khi chat: tổng số ký ức ≤ 40 (`MEMORY_INLINE_MAX`) thì đưa hết vào prompt, không gọi Voyage
+   (embedding câu hỏi mất 0,4–1,2s ngay trước Claude); nhiều hơn thì lấy top 8 ký ức liên quan.
 Việc cập nhật bộ nhớ chạy trong BackgroundTask sau khi stream xong.
 
 ## Prompt caching (backend/app/llm.py)
@@ -67,7 +68,9 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
       Chỉnh đã làm (đo được): STT `sample_rate=24000` khớp room_io (để 16k thì resampler giữ
       ~1s audio → chốt lượt chậm thêm 1,1s); `max_endpoint_delay_ms=500`; tắt language ID;
       ngắt lời mode "vad" (mode "adaptive" gọi LiveKit Cloud bị timeout 0,8s rồi mới rơi về VAD);
-      `aec_warmup_duration=1.0` (mặc định khoá ngắt lời 3s đầu); `num_idle_processes=1`.
+      `num_idle_processes=1`. `aec_warmup_duration` giữ mặc định 3s: chỉ khoá
+      ngắt lời một lần mỗi phiên (câu trả lời đầu), đã thử 1s thì Ginger nghe nhầm tiếng
+      mình vọng lại thành lời anh ("Dạ, em nghe đây") ở câu trả lời đầu tiên.
       Chưa build/thử trên iPhone.
 - [~] Bản web (Safari, chờ Apple duyệt gói Developer): `LiveVoice.tsx` dùng chung, phần khác
       nhau nằm ở `src/livekit.tsx` / `src/livekit.web.tsx` và `src/config.ts` / `config.web.ts`.
@@ -99,6 +102,8 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
 - Tự rảnh tay (native): mở app hoặc quay lại app (AppState 'active') là tự bắt đầu trò chuyện,
   sang app khác ('background') thì kết thúc. Web vẫn phải chạm mic (Safari cần chạm mới phát
   được âm thanh). Chuyển từ chế độ gõ chữ về thì không tự bắt đầu.
+- Độ trễ mỗi lượt nói: trung vị ~3,0s (từ 3,8s, nhờ bỏ Voyage khỏi đường nóng). Chi tiết từng
+  chặng, những gì đã thử không ăn thua và các hướng còn lại (kèm đánh đổi): `docs/do-tre.md`.
 - Chế độ gõ chữ (`src/ChatScreen.tsx`, nút bàn phím ở góc trái header; nút micro để quay lại):
   stream qua `POST /chat`. Hai chế độ dùng chung cuộc trò chuyện (`src/conversation.ts`),
   mở chat thì tải lại tin của cuộc đang mở (cả lượt nói). Web: Enter gửi, Shift+Enter xuống dòng.

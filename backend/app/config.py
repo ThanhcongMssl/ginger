@@ -28,6 +28,8 @@ class Settings:
     user_name: str = os.getenv("USER_NAME", "anh")
     recent_messages: int = int(os.getenv("RECENT_MESSAGES", "20"))
     memory_top_k: int = int(os.getenv("MEMORY_TOP_K", "8"))
+    # Tổng số ký ức không quá mức này thì đưa hết vào prompt, không cần tìm theo vector.
+    memory_inline_max: int = int(os.getenv("MEMORY_INLINE_MAX", "40"))
     # Bỏ qua ký ức có độ tương đồng thấp hơn ngưỡng này (cosine similarity).
     memory_min_similarity: float = float(os.getenv("MEMORY_MIN_SIMILARITY", "0.3"))
     # Ký ức mới giống ký ức cũ hơn ngưỡng này thì cập nhật thay vì thêm mới.

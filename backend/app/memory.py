@@ -129,6 +129,16 @@ async def maybe_summarize(conversation_id: UUID) -> None:
 # ---------- Tầng 3: ký ức dài hạn ----------
 
 async def search_memories(query: str) -> list[dict]:
+    # Còn ít ký ức thì đưa hết vào prompt, khỏi gọi Voyage: embedding câu hỏi mất 0,4–1,2s
+    # ngay trước khi gọi Claude (chặng chậm thứ hai của mỗi lượt nói). Nhiều hơn mức này
+    # mới tìm theo vector.
+    async with pool.connection() as conn:
+        rows = await (await conn.execute(
+            "SELECT id, content FROM memories ORDER BY id LIMIT %s",
+            (settings.memory_inline_max + 1,),
+        )).fetchall()
+    if len(rows) <= settings.memory_inline_max:
+        return rows
     [vec] = await embed([query], input_type="query")
     async with pool.connection() as conn:
         rows = await (await conn.execute(
