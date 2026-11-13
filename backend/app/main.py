@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
@@ -37,8 +38,13 @@ async def lifespan(fastapi_app: FastAPI):
 app = FastAPI(title="Trợ lý ảo", lifespan=lifespan)
 
 
+def token_ok(authorization: str | None) -> bool:
+    # So bằng compare_digest để thời gian so không lộ token đúng tới đâu (backend mở ra Internet qua Funnel).
+    return secrets.compare_digest((authorization or "").encode(), f"Bearer {settings.app_token}".encode())
+
+
 def require_token(authorization: str = Header(default="")) -> None:
-    if authorization != f"Bearer {settings.app_token}":
+    if not token_ok(authorization):
         raise HTTPException(status_code=401, detail="Sai token")
 
 
@@ -112,7 +118,7 @@ async def voice_ws(ws: WebSocket):
     Server → app (đều kèm "turn"): partial*, transcript, reply_delta*, audio*, level*,
     rồi reply hoặc error. Hold-to-talk: server đóng kết nối sau lượt.
     """
-    if ws.headers.get("authorization") != f"Bearer {settings.app_token}":
+    if not token_ok(ws.headers.get("authorization")):
         await ws.close(code=4401)
         return
     device_id = accounts.parse_device_id(ws.headers.get("x-device-id"))

@@ -15,8 +15,8 @@ App mobile trợ lý ảo dựa trên AI:
   - LLM: Claude. Model để chat: người dùng chọn dòng Haiku / Sonnet / Opus trong Cài đặt (mặc
     định Sonnet), không chọn phiên bản. `backend/app/chat_models.py` hỏi Models API lấy bản mới
     nhất của dòng đó (nhớ 1 giờ), chọn cách tắt thinking theo `capabilities` của model (Sonnet 5.5
-    chỉ nhận `between_tools`, Haiku nhận `disabled`, Opus 5.5 không tắt được), lưu lựa chọn ở bảng
-    `settings` (agent chạy process riêng). Việc nền: `claude-haiku-5-5`
+    chỉ nhận `between_tools`, Haiku nhận `disabled`, Opus 5.5 không tắt được), lưu lựa chọn ở
+    `users.chat_model` (agent chạy process riêng). Việc nền: `claude-haiku-5-5`
   - Embedding: Voyage AI `voyage-3.5` (1024 chiều)
   - Giọng nói (giai đoạn 3): STT bằng Soniox; TTS bằng Soniox hoặc Vbee/FPT.AI nếu cần giọng Việt tự nhiên hơn
 - **Kiến trúc pipeline:** STT → LLM + bộ nhớ → TTS. Không dùng model speech-to-speech
@@ -147,8 +147,10 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
   - Expo: chạy `npx expo start --tunnel`
   - Backend: mở port 8000 bằng WSL mirrored networking, hoặc `netsh interface portproxy`
 - Postgres chạy bằng `docker.exe compose up -d` (Docker Desktop, chưa bật WSL integration)
-- Điện thoại gọi backend qua Tailscale Serve (HTTPS, dev build bị ATS chặn http):
-  `EXPO_PUBLIC_API_URL=https://<máy>.<tailnet>.ts.net` (`tailscale serve --bg 8000` trên Windows)
+- Điện thoại gọi backend qua Tailscale Funnel (HTTPS công khai, dev build bị ATS chặn http):
+  `EXPO_PUBLIC_API_URL=https://<máy>.<tailnet>.ts.net` (`tailscale funnel --bg 8000` trên Windows;
+  điện thoại không cần cài Tailscale). Backend mở ra Internet nên `APP_TOKEN` là lớp bảo vệ duy nhất:
+  mọi route trừ `/health` và bản web tĩnh phải qua `token_ok` (so bằng `secrets.compare_digest`)
   (giá trị thật nằm trong `app/.env`),
   Windows `netsh portproxy` 8000 → IP WSL (đổi sau mỗi lần reboot)
 - Expo CLI đăng nhập bằng `EXPO_TOKEN` trong `~/.zshrc`; chạy `npx expo start --tunnel`
