@@ -20,6 +20,7 @@ import logging
 import re
 import time
 import unicodedata
+from collections.abc import Callable
 from uuid import UUID
 
 from livekit.agents import (
@@ -37,6 +38,7 @@ from livekit.agents import (
     room_io,
     stt,
 )
+from livekit import rtc
 from livekit.plugins import krisp, silero, soniox
 
 from . import accounts, chat_models, memory
@@ -50,6 +52,8 @@ log = logging.getLogger("tro-ly.agent")
 AGENT_NAME = "ginger"
 # Im lặng lâu như vậy thì kết thúc cuộc gọi (STT tính tiền theo phút audio).
 AWAY_TIMEOUT_SEC = 20
+# Báo sẵn sàng dù chưa thấy âm thanh từ micro sau chừng này giây kể từ khi phiên bắt đầu.
+MIC_READY_FALLBACK_SEC = 6
 
 # Lọc tiếng vọng: khử vọng trên điện thoại không triệt hết, STT vẫn nghe ra lời Ginger
 # (vd. Ginger nói "bé Dừa ngửi mùi quen" → STT nghe "Bé giờ ngửi mùi quê") rồi tự ngắt
@@ -141,6 +145,24 @@ class Ginger(Agent):
         self._speaking = False
         self._spoke_until = 0.0
         self._segment_may_echo = False
+        # Gọi một lần khi âm thanh thật từ micro bắt đầu tới (xem _watch_mic).
+        self.on_mic_ready: Callable[[], None] = lambda: None
+        self._mic_ready = False
+
+    async def _watch_mic(self, frames):
+        """Báo khi âm thanh thật từ micro đầu tiên tới agent.
+
+        Agent chuyển sang "đang nghe" ngay khi vào phòng, nhưng kết nối nhận audio của anh còn
+        mất thêm 1,3–2,6s; trong lúc đó LiveKit chỉ đưa khung toàn số 0, nói gì cũng mất. Micro
+        thật (kể cả lúc im) luôn có chút tiếng nền nên khung khác 0 đầu tiên = đã nhận được audio.
+        """
+        t0 = time.monotonic()
+        async for f in frames:
+            if not self._mic_ready and any(f.data):
+                self._mic_ready = True
+                log.info("Micro đã tới agent sau %.2fs", time.monotonic() - t0)
+                self.on_mic_ready()
+            yield f
 
     def on_agent_state(self, state: str) -> None:
         if state == "speaking":
@@ -153,7 +175,7 @@ class Ginger(Agent):
         return 0.0 if self._speaking else time.monotonic() - self._spoke_until
 
     async def stt_node(self, audio, model_settings: ModelSettings):
-        async for ev in Agent.default.stt_node(self, audio, model_settings):
+        async for ev in Agent.default.stt_node(self, self._watch_mic(audio), model_settings):
             if isinstance(ev, stt.SpeechEvent):
                 if ev.type == stt.SpeechEventType.START_OF_SPEECH:
                     self._segment_may_echo = self._since_spoke() <= ECHO_START_TAIL_SEC
@@ -226,14 +248,19 @@ async def entrypoint(ctx: JobContext) -> None:
         user_id, UUID(meta["conversation_id"]) if meta.get("conversation_id") else None
     )
     agent = Ginger(user_id, conv_id)
-    start_opts = {}
+    room_opts = room_io.RoomOptions(
+        # Tắt DTX cho giọng Ginger: mặc định hễ im (hết câu, ngắt giữa câu) là agent chỉ gửi gói
+        # "tiếng ồn nền" (50 → 4 gói/giây), iPhone chuyển sang tự tạo tiếng nền thì kêu "bụp"
+        # ngay khi dứt chữ cuối. Gửi đủ gói lúc im chỉ tốn thêm vài kbps.
+        audio_output=room_io.AudioOutputOptions(
+            track_publish_options=rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE, dtx=False)
+        ),
+    )
     if await accounts.get_voice_isolation(user_id):
         # Krisp lọc giọng người khác / nhạc (karaoke nhà bên…), giữ giọng gần micro nhất.
         # Gói free của LiveKit Cloud chỉ có 100 phút/tháng nên để người dùng tự bật trong Cài đặt.
         try:
-            start_opts["room_options"] = room_io.RoomOptions(
-                audio_input=room_io.AudioInputOptions(noise_cancellation=krisp.voice_isolation())
-            )
+            room_opts.audio_input = room_io.AudioInputOptions(noise_cancellation=krisp.voice_isolation())
             log.info("Bật lọc giọng xung quanh (Krisp)")
         except Exception:
             log.exception("Không bật được lọc giọng xung quanh, chạy không lọc")
@@ -305,8 +332,23 @@ async def entrypoint(ctx: JobContext) -> None:
             log.info("Người dùng im lặng %ss, kết thúc phiên", AWAY_TIMEOUT_SEC)
             ctx.shutdown("user away")
 
-    await session.start(agent=agent, room=ctx.room, **start_opts)
+    def _mic_ready() -> None:
+        # App giữ hiệu ứng "đang kết nối" tới khi thấy attribute này (LiveVoice.tsx).
+        _spawn(ctx.room.local_participant.set_attributes({"mic_ready": "1"}))
+
+    agent.on_mic_ready = _mic_ready
+
+    async def _mic_ready_fallback() -> None:
+        # Micro im tuyệt đối (bị tắt tiếng…) thì không bao giờ có khung khác 0: vẫn báo sẵn sàng.
+        await asyncio.sleep(MIC_READY_FALLBACK_SEC)
+        if not agent._mic_ready:
+            log.info("Chưa thấy âm thanh từ micro sau %ss, vẫn báo sẵn sàng", MIC_READY_FALLBACK_SEC)
+            agent._mic_ready = True
+            _mic_ready()
+
+    await session.start(agent=agent, room=ctx.room, room_options=room_opts)
     await ctx.room.local_participant.set_attributes({"conversation_id": str(conv_id)})
+    _spawn(_mic_ready_fallback())
 
 
 _background: set[asyncio.Task] = set()

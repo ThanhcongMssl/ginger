@@ -18,6 +18,9 @@ export type Phase = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking
 
 export const ORB = 120;
 
+/** Chiều cao tối đa của mỗi thanh lúc kết nối. */
+const BAR_H = 44;
+
 /**
  * Nút micro. Lúc đang nghe, quanh nút có quầng sáng phồng theo âm lượng giọng anh
  * (thay cho quả cầu riêng ở giữa màn hình).
@@ -46,7 +49,7 @@ export function MicButton(props: {
       style={[
         styles.micHalo,
         {
-          opacity: Animated.multiply(appear, level.interpolate({ inputRange: [0, 1], outputRange: [opacity * 0.6, opacity], extrapolate: 'clamp' })),
+          opacity: Animated.multiply(appear, level.interpolate({ inputRange: [0, 1], outputRange: [opacity * 0.45, opacity], extrapolate: 'clamp' })),
           transform: [{ scale: level.interpolate({ inputRange: [0, 1], outputRange: [min, max], extrapolate: 'clamp' }) }],
         },
       ]}
@@ -55,8 +58,8 @@ export function MicButton(props: {
 
   return (
     <View style={styles.micWrap}>
-      {ring(1.15, 1.9, 0.22)}
-      {ring(1.05, 1.4, 0.35)}
+      {ring(1.1, 2.3, 0.28)}
+      {ring(1.04, 1.6, 0.42)}
       <Pressable
         onPress={props.onPress}
         style={[styles.talkBtn, listening && styles.talkBtnActive, props.dimmed && styles.talkBtnDimmed]}
@@ -69,7 +72,7 @@ export function MicButton(props: {
 }
 
 /**
- * Ba thanh nhấp nhô lần lượt, màu nhạt: đang kết nối, Gừng CHƯA nghe được. Phải khác hẳn
+ * Ba thanh vàng nhấp nhô lần lượt qua lại (boomerang): đang kết nối, Gừng CHƯA nghe được. Phải khác hẳn
  * quả cầu "đang nghĩ" để anh không tưởng Gừng đã nghe mà nói luôn (mất đoạn đầu).
  */
 export function ConnectingBars() {
@@ -79,7 +82,14 @@ export function ConnectingBars() {
   useEffect(() => {
     const animations = [
       Animated.timing(appear, { toValue: 1, duration: 250, useNativeDriver: true }),
-      Animated.loop(Animated.timing(clock, { toValue: 1, duration: 1200, easing: Easing.linear, useNativeDriver: true })),
+      // Boomerang: sóng chạy trái → phải rồi quay ngược phải → trái. Đổi chiều cao thật (không
+      // dùng scaleY, sẽ bóp dẹt hai đầu bo tròn) nên không chạy được bằng native driver.
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(clock, { toValue: 1, duration: 1300, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
+          Animated.timing(clock, { toValue: 0, duration: 1300, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
+        ]),
+      ),
     ];
     animations.forEach((a) => a.start());
     return () => animations.forEach((a) => a.stop());
@@ -88,17 +98,20 @@ export function ConnectingBars() {
   return (
     <Animated.View style={[styles.bars, { opacity: appear }]}>
       {[0, 1, 2].map((i) => {
-        // Mỗi thanh lệch 1/6 chu kỳ; nửa đầu chu kỳ của nó vươn lên rồi thu về, nửa sau nằm yên.
-        const t = Animated.modulo(Animated.add(clock, 1 - i / 6), 1);
+        // Đỉnh sóng ở vị trí `clock` (0 = thanh trái, 1 = thanh phải); thanh càng gần đỉnh càng cao,
+        // màu giữ nguyên.
+        const c = i / 2;
+        const near = (low: number) => ({
+          inputRange: [c - 0.5, c, c + 0.5],
+          outputRange: [low, BAR_H, low],
+          extrapolate: 'clamp' as const,
+        });
         return (
           <Animated.View
             key={i}
             style={[
               styles.bar,
-              {
-                opacity: t.interpolate({ inputRange: [0, 0.25, 0.5, 1], outputRange: [0.45, 1, 0.45, 0.45] }),
-                transform: [{ scaleY: t.interpolate({ inputRange: [0, 0.25, 0.5, 1], outputRange: [0.4, 1, 0.4, 0.4] }) }],
-              },
+              { height: clock.interpolate(near(BAR_H * 0.4)) },
             ]}
           />
         );
@@ -343,8 +356,8 @@ export const styles = StyleSheet.create({
   wave: { width: WAVE_W, height: WAVE_H, overflow: 'hidden' },
   orb: { position: 'absolute', width: ORB, height: ORB, borderRadius: ORB / 2, backgroundColor: C.primary },
   // Chung chân: các thanh đứng trên cùng một đáy và chỉ vươn lên, như cột sóng âm thanh.
-  bars: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, height: 44 },
-  bar: { width: 10, height: 44, borderRadius: 5, backgroundColor: C.muted, transformOrigin: 'bottom' },
+  bars: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, height: BAR_H },
+  bar: { width: 10, borderRadius: 5, backgroundColor: C.primary },
   ripple: { backgroundColor: 'transparent', borderWidth: 3, borderColor: C.primary },
   heard: { fontSize: 17, lineHeight: 24, color: C.muted, fontStyle: 'italic', textAlign: 'center' },
   error: { fontSize: 16, color: C.error, textAlign: 'center' },

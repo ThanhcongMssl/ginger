@@ -158,13 +158,20 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
 - Tự rảnh tay (native): mở app hoặc quay lại app (AppState 'active') là tự bắt đầu trò chuyện,
   sang app khác ('background') thì kết thúc. Web vẫn phải chạm mic (Safari cần chạm mới phát
   được âm thanh). Chuyển từ chế độ gõ chữ về thì không tự bắt đầu.
-- Lúc vào phòng (`phase` 'connecting' trong LiveVoice.tsx): 3 thanh nâu nhạt chung đáy nhấp nhô
-  (`ConnectingBars`), nút micro mờ, không dùng chữ. Phải khác hẳn quả cầu "đang nghĩ", vì native
+- Lúc vào phòng (`phase` 'connecting' trong LiveVoice.tsx): 3 thanh vàng chung đáy nhấp nhô qua lại
+  kiểu boomerang (`ConnectingBars`, đổi chiều cao thật để giữ đầu bo tròn), nút micro mờ, không dùng chữ. Phải khác hẳn quả cầu "đang nghĩ", vì native
   không có bộ đệm trước khi agent vào: anh tưởng Gừng đang nghe mà nói luôn thì mất đoạn đó.
+  Agent báo 'listening' ngay khi vào phòng nhưng audio micro còn 1–3s nữa mới tới (LiveKit đưa
+  khung toàn số 0, nói gì cũng mất): agent đặt attribute `mic_ready` khi khung khác 0 đầu tiên tới
+  (`Ginger._watch_mic`, sau 6s vẫn chưa có thì vẫn đặt), app giữ 'connecting' tới lúc đó.
+  Đo bằng client giả nói ngay khi sẵn sàng: trước mất nửa đầu câu, sau nghe đủ.
   Hết 'connecting' thì rung nhẹ (`expo-haptics`, nạp lười để dev build cũ không lỗi).
   LiveVoice chỉ có một cây `Layout`; phòng LiveKit là con không vẽ gì, báo trạng thái lên qua
   `onState`. Vẽ Layout riêng trong phòng thì lúc vào phòng React dựng lại: icon header và
   hiệu ứng kết nối nháy.
+- Tắt DTX cho track giọng Ginger (`AudioOutputOptions` trong agent.py): để DTX thì hễ im là agent
+  chỉ gửi gói tiếng ồn nền (50 → 4 gói/giây) và iPhone kêu "bụp" ngay khi dứt chữ cuối. Âm Soniox
+  và âm nhận qua LiveKit đều kết thúc sạch (đã đo).
 - Độ trễ mỗi lượt nói: trung vị ~3,0s (từ 3,8s, nhờ bỏ Voyage khỏi đường nóng). Chi tiết từng
   chặng, những gì đã thử không ăn thua và các hướng còn lại (kèm đánh đổi): `docs/do-tre.md`.
 - Chế độ gõ chữ (`src/ChatScreen.tsx`, nút bàn phím ở góc trái header; nút micro để quay lại):

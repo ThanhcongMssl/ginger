@@ -205,9 +205,13 @@ function Conversation({
   // sẽ nhận lại phần đã nói, nên hiện "đang nghe" luôn thay vì "đang kết nối".
   const buffering =
     PRECONNECT_BUFFER && isMicrophoneEnabled && (state === 'connecting' || state === 'initializing');
+  // Agent báo 'listening' ngay khi vào phòng nhưng còn 1–3s nữa mới nhận được audio của micro;
+  // nói lúc đó là mất. Agent đặt attribute 'mic_ready' khi audio thật đầu tiên tới (agent.py).
+  // Web có bộ đệm trước khi vào phòng nên không mất chữ, không cần chờ.
+  const micReady = PRECONNECT_BUFFER || agentAttributes?.mic_ready === '1';
   // 'idle' giữa phiên: micro vẫn mở, coi như đang nghe.
   const phase: Phase =
-    state === 'listening' || state === 'idle' || buffering
+    ((state === 'listening' || state === 'idle') && micReady) || buffering
       ? 'listening'
       : state === 'speaking' || state === 'thinking'
         ? state
@@ -266,7 +270,7 @@ function Conversation({
   // Âm lượng micro → quầng sáng quanh nút (trượt mượt). Vạch nhịp tim đọc âm lượng Ginger mỗi
   // khung hình nên dùng ref (Animated.Value chạy native không đọc được).
   useEffect(() => {
-    Animated.timing(micLevel, { toValue: toLevel(micVolume), duration: 100, useNativeDriver: true }).start();
+    Animated.timing(micLevel, { toValue: micToLevel(micVolume), duration: 80, useNativeDriver: true }).start();
   }, [micVolume, micLevel]);
   useEffect(() => {
     speakLevelRef.current = toLevel(agentVolume);
@@ -297,6 +301,13 @@ function readyTap() {
 
 /** Âm lượng từ WebRTC (RMS 0..1, thường rất nhỏ) → 0..1; căn bậc hai để giọng nhỏ vẫn thấy nhún. */
 const toLevel = (volume: number) => Math.min(1, Math.sqrt(volume) * 1.5);
+
+/**
+ * Âm lượng micro → 0..1 cho quầng sáng. Micro đã qua khử vọng/AGC nên nhỏ hơn giọng Ginger:
+ * nói thường chỉ ra ~0,3 theo toLevel, quầng gần như đứng yên. Ở đây trừ ồn nền (căn bậc hai
+ * ~0,04) rồi khuếch đại mạnh, nói thường đã lên ~0,6–0,9.
+ */
+const micToLevel = (volume: number) => Math.min(1, Math.max(0, Math.sqrt(volume) - 0.04) * 3.5);
 
 function Layout(props: {
   phase: Phase;
