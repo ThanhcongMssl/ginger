@@ -3,6 +3,12 @@
     "name": "Ginger",
     "slug": "tro-ly",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/8f7a1a16-4307-42b3-b03d-6af3966bf8ff"
+    },
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",

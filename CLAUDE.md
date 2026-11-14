@@ -124,6 +124,12 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
   "ừ", "có" nói ngay trong 1s sau khi Ginger dứt lời bị bỏ qua. Đo bằng client giả trộn 30%
   giọng Ginger ngược vào micro: Ginger nói liền 70s không tự ngắt (trước đó tự ngắt sau vài
   giây), chen "Thôi dừng lại" vẫn dừng.
+- Lọc giọng xung quanh (công tắc trong Cài đặt, `users.voice_isolation`, mặc định tắt): agent bật
+  Krisp voice isolation (`livekit-plugins-krisp`) ở đầu vào audio, bỏ giọng người khác / TV /
+  karaoke, giữ giọng gần micro nhất. Có công tắc vì gói free LiveKit Cloud chỉ có 100 phút
+  voice isolation/tháng (Ship $50: 1.000 phút); hết phút thì chưa rõ LiveKit xử lý ra sao.
+  Áp dụng từ phiên sau. Đo bằng client giả: không thêm độ trễ (transcript ~0,8s), không mất đầu
+  câu, lọc tiếng vọng và ngắt lời vẫn chạy. Chưa thử với karaoke thật.
 - Bắt đầu nhanh (web): agent vào phòng mất 3–5s (kết nối từ WSL tới LiveKit India South, đo
   bằng script riêng vẫn 3–4s; gọi agent bằng API dispatch còn chậm hơn ~2s nên không dùng).
   Bản web bật `preConnectBuffer`: micro thu ngay khi kết nối, app hiện "đang nghe" sau ~1s,
@@ -136,6 +142,14 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
   (không ghi vào eas.json vì repo public). Token không đóng gói: `TokenGate` hỏi một lần, lưu
   Keychain (`expo-secure-store`, nạp lười để dev build cũ không lỗi). Đổi địa chỉ backend thì
   `eas env:update` rồi build lại.
+- Cập nhật qua mạng (EAS Update, `expo-updates`, channel `preview`): đổi JS/TS thì chạy
+  `bash scripts/ota.sh "mô tả"` trong `app/`, không cần build lại; app preview tải bản mới khi mở,
+  chạy bản đó từ lần mở sau. Thêm/nâng thư viện native hay đổi app.json thì vẫn phải build.
+  `runtimeVersion` theo fingerprint, tính cả `scripts` trong package.json và `.gitignore`: sửa
+  hai chỗ đó cũng phải build lại (script tự so với build preview mới nhất, lệch thì dừng).
+  Không chạy thẳng `eas update`: nó đóng gói trên máy và đọc `app/.env` nên nhúng
+  `EXPO_PUBLIC_APP_TOKEN` vào bản update (đã thử). `scripts/ota.sh` tắt .env (`EXPO_NO_DOTENV=1`),
+  lấy biến từ môi trường EAS `preview`, kiểm tra bundle không có token rồi mới tải lên.
 - Tự rảnh tay (native): mở app hoặc quay lại app (AppState 'active') là tự bắt đầu trò chuyện,
   sang app khác ('background') thì kết thúc. Web vẫn phải chạm mic (Safari cần chạm mới phát
   được âm thanh). Chuyển từ chế độ gõ chữ về thì không tự bắt đầu.

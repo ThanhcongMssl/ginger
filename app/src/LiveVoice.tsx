@@ -25,6 +25,7 @@ import {
   useVoiceAssistant,
 } from './livekit';
 import { useDucking } from './ducking';
+import { GingerPlant } from './GingerPlant';
 import { conversation } from './conversation';
 import {
   ConnectingBars,
@@ -44,7 +45,8 @@ const AUTO_START = Platform.OS !== 'web';
 let launched = false;
 
 export default function LiveVoice({ onTextMode }: { onTextMode: () => void }) {
-  const [conn, setConn] = useState<{ url: string; token: string } | null>(null);
+  // `attempt`: lần bắt đầu nào cấp kết nối này (xem attempt.current bên dưới).
+  const [conn, setConn] = useState<{ url: string; token: string; attempt: number } | null>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // ID cuộc trò chuyện (src/conversation.ts): agent báo qua attribute, lần sau gửi lại để nối tiếp.
@@ -59,7 +61,7 @@ export default function LiveVoice({ onTextMode }: { onTextMode: () => void }) {
     try {
       await startAudio();
       const c = await getLiveKitToken(conversation.current);
-      if (id === attempt.current) setConn(c);
+      if (id === attempt.current) setConn({ ...c, attempt: id });
     } catch (e) {
       if (id !== attempt.current) return;
       setError(e instanceof Error ? e.message : 'Không kết nối được');
@@ -147,6 +149,8 @@ export default function LiveVoice({ onTextMode }: { onTextMode: () => void }) {
           onConnected={() => setStarting(false)}
           onDisconnected={end}
           onError={(e) => {
+            // Anh huỷ lúc đang kết nối: LiveKit báo "Client initiated disconnect", không phải lỗi.
+            if (conn.attempt !== attempt.current) return;
             setError(e.message);
             end();
           }}
@@ -319,26 +323,32 @@ function Layout(props: {
         <SettingsButton disabled={active} onHistoryCleared={props.onHistoryCleared} />
       </View>
 
-      <View style={styles.body}>
-        <View style={styles.visual}>
-          {phase === 'connecting' && <ConnectingBars />}
-          {phase === 'thinking' && <ThinkingOrb />}
-          {phase === 'speaking' && <SpeakingWave level={props.speakLevel} />}
+      <View style={styles.stage}>
+        {/* Cây gừng căn giữa cả vùng dưới header, giống hệt chỗ của nó ở chế độ gõ chữ. */}
+        <View style={styles.plantLayer} pointerEvents="none">
+          <GingerPlant visible={phase === 'idle'} />
         </View>
-        <View style={styles.caption}>
-          {heard ? <Text style={styles.heard} numberOfLines={4}>{heard}</Text> : null}
-          {error && <Text style={styles.error}>{error}</Text>}
+        <View style={styles.body}>
+          <View style={styles.visual}>
+            {phase === 'connecting' && <ConnectingBars />}
+            {phase === 'thinking' && <ThinkingOrb />}
+            {phase === 'speaking' && <SpeakingWave level={props.speakLevel} />}
+          </View>
+          <View style={styles.caption}>
+            {heard ? <Text style={styles.heard} numberOfLines={4}>{heard}</Text> : null}
+            {error && <Text style={styles.error}>{error}</Text>}
+          </View>
         </View>
-      </View>
 
-      <View style={styles.footer}>
-        <MicButton
-          listening={phase === 'listening'}
-          dimmed={phase === 'connecting'}
-          level={props.micLevel}
-          onPress={props.onMic}
-          label={active ? 'Kết thúc trò chuyện' : 'Bắt đầu trò chuyện'}
-        />
+        <View style={styles.footer}>
+          <MicButton
+            listening={phase === 'listening'}
+            dimmed={phase === 'connecting'}
+            level={props.micLevel}
+            onPress={props.onMic}
+            label={active ? 'Kết thúc trò chuyện' : 'Bắt đầu trò chuyện'}
+          />
+        </View>
       </View>
       {props.children}
     </SafeAreaView>

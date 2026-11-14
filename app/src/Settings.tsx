@@ -3,7 +3,7 @@
  * Xoá phải bấm 2 lần (Alert của React Native không chạy trên web).
  */
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
@@ -14,6 +14,7 @@ import {
   getMemories,
   getSettings,
   setModel,
+  setVoiceIsolation,
   type AppSettings,
   type DataStats,
   type Memory,
@@ -99,6 +100,18 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
       setError(null);
     } catch (e) {
       setSettings((cur) => (cur ? { ...cur, model: before } : cur));
+      setError(e instanceof Error ? e.message : 'Không lưu được');
+    }
+  };
+
+  const toggleVoiceIsolation = async (on: boolean) => {
+    if (!settings) return;
+    setSettings({ ...settings, voice_isolation: on });
+    try {
+      await setVoiceIsolation(on);
+      setError(null);
+    } catch (e) {
+      setSettings((cur) => (cur ? { ...cur, voice_isolation: !on } : cur));
       setError(e instanceof Error ? e.message : 'Không lưu được');
     }
   };
@@ -263,6 +276,25 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
           )}
         </View>
         <Text style={s.note}>Luôn dùng bản mới nhất của dòng đã chọn. Áp dụng từ câu hỏi tiếp theo.</Text>
+
+        <Text style={s.section}>NGHE</Text>
+        <View style={s.card}>
+          <View style={s.row}>
+            <View style={s.rowText}>
+              <Text style={s.rowTitle}>Lọc giọng xung quanh</Text>
+            </View>
+            {settings === null ? (
+              <ActivityIndicator color={C.primary} />
+            ) : (
+              <Switch
+                value={settings.voice_isolation}
+                onValueChange={toggleVoiceIsolation}
+                trackColor={{ true: C.listening }}
+                accessibilityLabel="Lọc giọng xung quanh"
+              />
+            )}
+          </View>
+        </View>
 
         <Text style={s.section}>BỘ NHỚ CỦA GỪNG</Text>
         <View style={s.card}>

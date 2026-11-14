@@ -177,7 +177,12 @@ export async function clearConversations(): Promise<void> {
 
 export type ModelFamily = 'haiku' | 'sonnet' | 'opus';
 /** `models`: bản mới nhất của từng dòng, backend tự tra (vd. "Claude Opus 5.5"). */
-export type AppSettings = { model: ModelFamily; models: { family: ModelFamily; name: string }[] };
+export type AppSettings = {
+  model: ModelFamily;
+  models: { family: ModelFamily; name: string }[];
+  /** Lọc giọng xung quanh ở agent (Krisp); gói free LiveKit chỉ có 100 phút/tháng. */
+  voice_isolation: boolean;
+};
 
 export async function getSettings(): Promise<AppSettings> {
   const res = await fetch(`${API_URL}/settings`, { headers: authHeaders() });
@@ -185,14 +190,23 @@ export async function getSettings(): Promise<AppSettings> {
   return (await res.json()) as AppSettings;
 }
 
-/** Chọn dòng model để trò chuyện; áp dụng từ câu hỏi tiếp theo. */
-export async function setModel(model: ModelFamily): Promise<void> {
+async function putSettings(body: Partial<Pick<AppSettings, 'model' | 'voice_isolation'>>): Promise<void> {
   const res = await fetch(`${API_URL}/settings`, {
     method: 'PUT',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`Lỗi server ${res.status}`);
+}
+
+/** Chọn dòng model để trò chuyện; áp dụng từ câu hỏi tiếp theo. */
+export function setModel(model: ModelFamily): Promise<void> {
+  return putSettings({ model });
+}
+
+/** Bật/tắt lọc giọng xung quanh; áp dụng từ lần trò chuyện tiếp theo. */
+export function setVoiceIsolation(on: boolean): Promise<void> {
+  return putSettings({ voice_isolation: on });
 }
 
 export type ChatMessage = { role: 'user' | 'assistant'; content: string };

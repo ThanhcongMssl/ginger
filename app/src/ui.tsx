@@ -336,6 +336,10 @@ export const styles = StyleSheet.create({
   body: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   caption: { position: 'absolute', left: 24, right: 24, bottom: 16, gap: 8 },
   visual: { width: ORB * 2.4, height: ORB * 2.4, alignItems: 'center', justifyContent: 'center' },
+  /** Vùng dưới header (thân + nút micro); cây gừng căn giữa vùng này, như vùng dưới header ở chế độ gõ chữ. */
+  stage: { flex: 1 },
+  // Cây gừng nằm chồng dưới các hiệu ứng khác để mờ dần ra/vào khi đổi trạng thái.
+  plantLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, alignItems: 'center', justifyContent: 'center' },
   wave: { width: WAVE_W, height: WAVE_H, overflow: 'hidden' },
   orb: { position: 'absolute', width: ORB, height: ORB, borderRadius: ORB / 2, backgroundColor: C.primary },
   // Chung chân: các thanh đứng trên cùng một đáy và chỉ vươn lên, như cột sóng âm thanh.

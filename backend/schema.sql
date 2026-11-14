@@ -58,5 +58,7 @@ CREATE INDEX IF NOT EXISTS memories_embedding_idx
 -- thấy cho tới khi gán tay cho một tài khoản.
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE CASCADE;
 ALTER TABLE memories ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+-- Lọc giọng xung quanh (Krisp voice isolation ở agent): tốn phút của LiveKit Cloud nên mặc định tắt.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS voice_isolation BOOLEAN NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS conversations_user_idx ON conversations (user_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS memories_user_idx ON memories (user_id, id);

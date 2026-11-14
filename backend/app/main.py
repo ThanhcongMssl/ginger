@@ -399,7 +399,8 @@ async def remove_memory(memory_id: int, user_id: UUID = User):
 
 
 class SettingsUpdate(BaseModel):
-    model: str
+    model: str | None = None
+    voice_isolation: bool | None = None
 
 
 @app.get("/settings", dependencies=auth)
@@ -409,15 +410,20 @@ async def get_settings(user_id: UUID = User):
     return {
         "model": await chat_models.get_family(user_id),
         "models": [{"family": m.family, "name": m.name} for m in models.values()],
+        "voice_isolation": await accounts.get_voice_isolation(user_id),
     }
 
 
 @app.put("/settings", dependencies=auth)
 async def update_settings(req: SettingsUpdate, user_id: UUID = User):
-    if req.model not in chat_models.FAMILIES:
-        raise HTTPException(status_code=422, detail="Model không hợp lệ")
-    await chat_models.set_family(user_id, req.model)
-    return {"model": req.model}
+    """Chỉ đổi những mục được gửi lên."""
+    if req.model is not None:
+        if req.model not in chat_models.FAMILIES:
+            raise HTTPException(status_code=422, detail="Model không hợp lệ")
+        await chat_models.set_family(user_id, req.model)
+    if req.voice_isolation is not None:
+        await accounts.set_voice_isolation(user_id, req.voice_isolation)
+    return req.model_dump(exclude_none=True)
 
 
 # Bản web của app (`npx expo export -p web` → app/dist). Phục vụ cùng địa chỉ với API để

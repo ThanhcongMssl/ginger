@@ -34,11 +34,12 @@ from livekit.agents import (
     UserStateChangedEvent,
     cli,
     llm,
+    room_io,
     stt,
 )
-from livekit.plugins import silero, soniox
+from livekit.plugins import krisp, silero, soniox
 
-from . import chat_models, memory
+from . import accounts, chat_models, memory
 from .config import settings
 from .db import init_db
 from .llm import FALLBACK_REPLY, stream_reply
@@ -224,6 +225,17 @@ async def entrypoint(ctx: JobContext) -> None:
         user_id, UUID(meta["conversation_id"]) if meta.get("conversation_id") else None
     )
     agent = Ginger(user_id, conv_id)
+    start_opts = {}
+    if await accounts.get_voice_isolation(user_id):
+        # Krisp lọc giọng người khác / nhạc (karaoke nhà bên…), giữ giọng gần micro nhất.
+        # Gói free của LiveKit Cloud chỉ có 100 phút/tháng nên để người dùng tự bật trong Cài đặt.
+        try:
+            start_opts["room_options"] = room_io.RoomOptions(
+                audio_input=room_io.AudioInputOptions(noise_cancellation=krisp.voice_isolation())
+            )
+            log.info("Bật lọc giọng xung quanh (Krisp)")
+        except Exception:
+            log.exception("Không bật được lọc giọng xung quanh, chạy không lọc")
 
     session = AgentSession(
         stt=soniox.STT(params=soniox.STTOptions(
@@ -286,7 +298,7 @@ async def entrypoint(ctx: JobContext) -> None:
             log.info("Người dùng im lặng %ss, kết thúc phiên", AWAY_TIMEOUT_SEC)
             ctx.shutdown("user away")
 
-    await session.start(agent=agent, room=ctx.room)
+    await session.start(agent=agent, room=ctx.room, **start_opts)
     await ctx.room.local_participant.set_attributes({"conversation_id": str(conv_id)})
 
 

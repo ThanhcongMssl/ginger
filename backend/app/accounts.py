@@ -43,3 +43,17 @@ async def user_for_device(device_id: str) -> UUID:
             "SELECT user_id FROM devices WHERE id = %s", (device_id,)
         )).fetchone()
         return row["user_id"]
+
+
+async def get_voice_isolation(user_id: UUID) -> bool:
+    """Lọc giọng xung quanh (Krisp ở agent). Tốn phút voice isolation của LiveKit Cloud."""
+    async with pool.connection() as conn:
+        row = await (await conn.execute(
+            "SELECT voice_isolation FROM users WHERE id = %s", (user_id,)
+        )).fetchone()
+    return bool(row and row["voice_isolation"])
+
+
+async def set_voice_isolation(user_id: UUID, on: bool) -> None:
+    async with pool.connection() as conn:
+        await conn.execute("UPDATE users SET voice_isolation = %s WHERE id = %s", (on, user_id))

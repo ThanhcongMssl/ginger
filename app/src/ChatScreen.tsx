@@ -5,7 +5,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
+  Animated,
+  Keyboard,
   Platform,
   Pressable,
   ScrollView,
@@ -15,14 +16,45 @@ import {
   View,
   type ScrollViewInstance,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getMessages, sendChat, type ChatMessage } from './api';
 import { conversation } from './conversation';
+import { GingerPlant } from './GingerPlant';
 import { SettingsButton } from './Settings';
 import { C, HeaderButton, Logo, MicIcon, SendIcon, styles as ui } from './ui';
 
+/**
+ * Chỗ trống bằng phần bàn phím che (trừ vùng an toàn đáy), dâng lên cùng lúc với bàn phím.
+ * Không dùng KeyboardAvoidingView: nó đặt đệm qua LayoutAnimation sau một vòng JS nên khung
+ * nhập chữ lên chậm hơn bàn phím. Ở đây chạy theo sự kiện "will" (trước khi bàn phím bắt đầu
+ * chạy) bằng lò xo giống đường cong bàn phím iOS. Android tự co cửa sổ (adjustResize).
+ */
+function useKeyboardSpace() {
+  const { bottom } = useSafeAreaInsets();
+  const space = useState(() => new Animated.Value(0))[0];
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    const to = (value: number) =>
+      Animated.spring(space, {
+        toValue: value,
+        mass: 3,
+        stiffness: 1000,
+        damping: 500,
+        overshootClamping: true,
+        useNativeDriver: false,
+      }).start();
+    const subs = [
+      Keyboard.addListener('keyboardWillShow', (e) => to(Math.max(e.endCoordinates.height - bottom, 0))),
+      Keyboard.addListener('keyboardWillHide', () => to(0)),
+    ];
+    return () => subs.forEach((sub) => sub.remove());
+  }, [space, bottom]);
+  return space;
+}
+
 export default function ChatScreen({ onVoiceMode }: { onVoiceMode: () => void }) {
+  const keyboardSpace = useKeyboardSpace();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(conversation.current !== null);
   const [input, setInput] = useState('');
@@ -99,7 +131,12 @@ export default function ChatScreen({ onVoiceMode }: { onVoiceMode: () => void })
         />
       </View>
 
-      <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {/* Co lại khi bàn phím mở (chỗ trống bên dưới dâng lên), nên cây gừng căn giữa lại. */}
+      <View style={s.flex}>
+        {/* Ngoài ScrollView để lòng đất tràn xuống cả khung nhập chữ tới đáy màn hình. */}
+        <View style={s.plantLayer} pointerEvents="none">
+          <GingerPlant visible={!loading && messages.length === 0 && !waiting} />
+        </View>
         <ScrollView
           ref={scroll}
           style={s.flex}
@@ -108,9 +145,6 @@ export default function ChatScreen({ onVoiceMode }: { onVoiceMode: () => void })
           onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
         >
           {loading && <ActivityIndicator color={C.primary} style={s.loading} />}
-          {!loading && messages.length === 0 && (
-            <Text style={s.empty}>Cần gì cứ nhắn cho Gừng nhé.</Text>
-          )}
           {messages.map((m, i) =>
             m.role === 'assistant' && !m.content ? null : (
               <View key={i} style={[s.bubble, m.role === 'user' ? s.userBubble : s.botBubble]}>
@@ -170,7 +204,8 @@ export default function ChatScreen({ onVoiceMode }: { onVoiceMode: () => void })
             </Pressable>
           )}
         </View>
-      </KeyboardAvoidingView>
+      </View>
+      <Animated.View style={{ height: keyboardSpace }} />
     </SafeAreaView>
   );
 }
@@ -179,7 +214,7 @@ const s = StyleSheet.create({
   flex: { flex: 1 },
   list: { padding: 16, gap: 10, flexGrow: 1 },
   loading: { marginTop: 24 },
-  empty: { marginTop: 48, fontSize: 16, color: C.muted, textAlign: 'center' },
+  plantLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, alignItems: 'center', justifyContent: 'center' },
   bubble: { maxWidth: '85%', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 18 },
   userBubble: { alignSelf: 'flex-end', backgroundColor: C.primary, borderBottomRightRadius: 6 },
   botBubble: { alignSelf: 'flex-start', backgroundColor: '#FFFFFF', borderBottomLeftRadius: 6 },
