@@ -8,7 +8,7 @@
  */
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { RoomEvent, type LocalAudioTrack, type RemoteAudioTrack } from 'livekit-client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Animated, AppState, Platform, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -27,6 +27,7 @@ import {
 import { useDucking } from './ducking';
 import { conversation } from './conversation';
 import {
+  ConnectingBars,
   HeaderButton,
   KeyboardIcon,
   Logo,
@@ -112,46 +113,76 @@ export default function LiveVoice({ onTextMode }: { onTextMode: () => void }) {
     };
   }, [active]);
 
-  if (!conn) {
-    return (
-      <Layout
-        phase={starting ? 'thinking' : 'idle'}
-        heard=""
-        error={error}
-        active={starting}
-        onMic={starting ? end : start}
-        onHistoryCleared={() => (conversation.current = null)}
-        onTextMode={onTextMode}
-      />
-    );
-  }
+  // Giao diện luôn là MỘT cây Layout, phòng LiveKit chỉ là con không hiện gì bên trong và báo
+  // trạng thái lên. Nếu vẽ Layout riêng trong phòng thì lúc vào phòng React dựng lại từ đầu:
+  // icon header nháy, hiệu ứng kết nối chạy lại.
+  const [live, setLive] = useState<LiveState>(INITIAL_LIVE);
+  const micLevel = useState(() => new Animated.Value(0))[0];
+  const speakLevelRef = useRef(0);
+  const phase: Phase = conn ? live.phase : starting ? 'connecting' : 'idle';
+
+  // Vừa hết "đang kết nối" (Gừng đã nghe được): rung nhẹ, để biết là nói được mà không cần nhìn.
+  const prevPhase = useRef<Phase>('idle');
+  useEffect(() => {
+    if (prevPhase.current === 'connecting' && phase !== 'connecting' && phase !== 'idle') readyTap();
+    prevPhase.current = phase;
+  }, [phase]);
 
   return (
-    <Room
-      serverUrl={conn.url}
-      token={conn.token}
-      onConnected={() => setStarting(false)}
-      onDisconnected={end}
-      onError={(e) => {
-        setError(e.message);
-        end();
-      }}
+    <Layout
+      phase={phase}
+      heard={conn ? live.heard : ''}
+      error={error}
+      active={active}
+      micLevel={micLevel}
+      speakLevel={speakLevelRef}
+      onMic={active ? end : start}
+      onHistoryCleared={() => (conversation.current = null)}
+      onTextMode={onTextMode}
     >
-      <Conversation
-        onEnd={end}
-        onFail={fail}
-        onConversationId={(id) => (conversation.current = id)}
-      />
-    </Room>
+      {conn && (
+        <Room
+          serverUrl={conn.url}
+          token={conn.token}
+          onConnected={() => setStarting(false)}
+          onDisconnected={end}
+          onError={(e) => {
+            setError(e.message);
+            end();
+          }}
+        >
+          <Conversation
+            onState={setLive}
+            micLevel={micLevel}
+            speakLevelRef={speakLevelRef}
+            onEnd={end}
+            onFail={fail}
+            onConversationId={(id) => (conversation.current = id)}
+          />
+        </Room>
+      )}
+    </Layout>
   );
 }
 
-/** Bên trong phòng: đọc trạng thái agent, âm lượng và chữ anh nói để vẽ giao diện. */
+type LiveState = { phase: Phase; heard: string };
+const INITIAL_LIVE: LiveState = { phase: 'connecting', heard: '' };
+
+/**
+ * Bên trong phòng: đọc trạng thái agent, âm lượng và chữ anh nói rồi báo lên LiveVoice vẽ.
+ * Không tự vẽ gì.
+ */
 function Conversation({
+  onState,
+  micLevel,
+  speakLevelRef,
   onEnd,
   onFail,
   onConversationId,
 }: {
+  onState: (s: LiveState) => void;
+  micLevel: Animated.Value;
+  speakLevelRef: { current: number };
   onEnd: () => void;
   onFail: (message: string) => void;
   onConversationId: (id: string) => void;
@@ -167,11 +198,22 @@ function Conversation({
   const [heard, setHeard] = useState('');
 
   // Agent cần vài giây để vào phòng. Có bộ đệm (web) thì micro đã thu từ lúc này, agent vào
-  // sẽ nhận lại phần đã nói, nên hiện "đang nghe" luôn thay vì "đang nghĩ".
+  // sẽ nhận lại phần đã nói, nên hiện "đang nghe" luôn thay vì "đang kết nối".
   const buffering =
     PRECONNECT_BUFFER && isMicrophoneEnabled && (state === 'connecting' || state === 'initializing');
+  // 'idle' giữa phiên: micro vẫn mở, coi như đang nghe.
   const phase: Phase =
-    state === 'listening' || buffering ? 'listening' : state === 'speaking' ? 'speaking' : 'thinking';
+    state === 'listening' || state === 'idle' || buffering
+      ? 'listening'
+      : state === 'speaking' || state === 'thinking'
+        ? state
+        : 'connecting';
+
+  useEffect(() => {
+    onState({ phase, heard });
+  }, [phase, heard, onState]);
+  // Rời phòng thì trả về trạng thái đầu cho lần sau.
+  useEffect(() => () => onState(INITIAL_LIVE), [onState]);
 
   // Agent mãi không vào (agent chưa chạy, mạng lỗi) thì báo lỗi thay vì chờ vô hạn.
   useEffect(() => {
@@ -217,72 +259,71 @@ function Conversation({
     };
   }, [room]);
 
-  const micLevel = useLevel(micVolume);
-  // Vạch nhịp tim đọc âm lượng mỗi khung hình nên dùng ref (Animated.Value chạy native không đọc được).
-  const speakLevel = useRef(0);
+  // Âm lượng micro → quầng sáng quanh nút (trượt mượt). Vạch nhịp tim đọc âm lượng Ginger mỗi
+  // khung hình nên dùng ref (Animated.Value chạy native không đọc được).
   useEffect(() => {
-    speakLevel.current = toLevel(agentVolume);
-  }, [agentVolume]);
-
-  return (
-    <Layout
-      phase={phase}
-      heard={heard}
-      error={null}
-      active
-      micLevel={micLevel}
-      speakLevel={speakLevel}
-      onMic={onEnd}
-    />
+    Animated.timing(micLevel, { toValue: toLevel(micVolume), duration: 100, useNativeDriver: true }).start();
+  }, [micVolume, micLevel]);
+  useEffect(() => {
+    speakLevelRef.current = toLevel(agentVolume);
+  }, [agentVolume, speakLevelRef]);
+  useEffect(
+    () => () => {
+      micLevel.setValue(0);
+      speakLevelRef.current = 0;
+    },
+    [micLevel, speakLevelRef],
   );
+
+  return null;
+}
+
+// Nạp khi cần: dev build cũ chưa có module native này.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const haptics = (): typeof import('expo-haptics') => require('expo-haptics');
+
+function readyTap() {
+  if (Platform.OS === 'web') return;
+  try {
+    haptics().impactAsync(haptics().ImpactFeedbackStyle.Medium).catch(() => {});
+  } catch {
+    // dev build cũ chưa có expo-haptics: bỏ qua
+  }
 }
 
 /** Âm lượng từ WebRTC (RMS 0..1, thường rất nhỏ) → 0..1; căn bậc hai để giọng nhỏ vẫn thấy nhún. */
 const toLevel = (volume: number) => Math.min(1, Math.sqrt(volume) * 1.5);
-
-/** Âm lượng → Animated.Value 0..1 trượt mượt. */
-function useLevel(volume: number) {
-  const level = useState(() => new Animated.Value(0))[0];
-  useEffect(() => {
-    Animated.timing(level, { toValue: toLevel(volume), duration: 100, useNativeDriver: true }).start();
-  }, [volume, level]);
-  return level;
-}
-
-const NO_LEVEL = { current: 0 };
 
 function Layout(props: {
   phase: Phase;
   heard: string;
   error: string | null;
   active: boolean;
-  micLevel?: Animated.Value;
-  speakLevel?: { current: number };
+  micLevel: Animated.Value;
+  speakLevel: { current: number };
   onMic: () => void;
-  /** Chỉ có lúc chưa trò chuyện: hiện nút cài đặt và nút chuyển sang gõ chữ. */
-  onHistoryCleared?: () => void;
-  onTextMode?: () => void;
+  onHistoryCleared: () => void;
+  onTextMode: () => void;
+  /** Phòng LiveKit (không hiện gì, chỉ báo trạng thái lên). */
+  children?: ReactNode;
 }) {
-  const { phase, heard, error, active, onMic } = props;
-  const zero = useState(() => new Animated.Value(0))[0];
+  const { phase, heard, error, active } = props;
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      {/* Đang trò chuyện thì khoá (mờ) hai nút header, không ẩn đi để khỏi nháy. */}
       <View style={styles.header}>
-        {props.onTextMode && (
-          <HeaderButton side="left" label="Gõ chữ" disabled={active} onPress={props.onTextMode}>
-            <KeyboardIcon />
-          </HeaderButton>
-        )}
+        <HeaderButton side="left" label="Gõ chữ" disabled={active} onPress={props.onTextMode}>
+          <KeyboardIcon />
+        </HeaderButton>
         <Logo />
-        {props.onHistoryCleared && (
-          <SettingsButton disabled={active} onHistoryCleared={props.onHistoryCleared} />
-        )}
+        <SettingsButton disabled={active} onHistoryCleared={props.onHistoryCleared} />
       </View>
 
       <View style={styles.body}>
         <View style={styles.visual}>
+          {phase === 'connecting' && <ConnectingBars />}
           {phase === 'thinking' && <ThinkingOrb />}
-          {phase === 'speaking' && <SpeakingWave level={props.speakLevel ?? NO_LEVEL} />}
+          {phase === 'speaking' && <SpeakingWave level={props.speakLevel} />}
         </View>
         <View style={styles.caption}>
           {heard ? <Text style={styles.heard} numberOfLines={4}>{heard}</Text> : null}
@@ -293,11 +334,13 @@ function Layout(props: {
       <View style={styles.footer}>
         <MicButton
           listening={phase === 'listening'}
-          level={props.micLevel ?? zero}
-          onPress={onMic}
+          dimmed={phase === 'connecting'}
+          level={props.micLevel}
+          onPress={props.onMic}
           label={active ? 'Kết thúc trò chuyện' : 'Bắt đầu trò chuyện'}
         />
       </View>
+      {props.children}
     </SafeAreaView>
   );
 }

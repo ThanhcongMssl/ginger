@@ -14,7 +14,7 @@ export const C = {
   line: '#F1E2B3',
 };
 
-export type Phase = 'idle' | 'listening' | 'thinking' | 'speaking';
+export type Phase = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking';
 
 export const ORB = 120;
 
@@ -24,6 +24,8 @@ export const ORB = 120;
  */
 export function MicButton(props: {
   listening: boolean;
+  /** Đang kết nối, chưa nghe được: nút mờ đi để anh biết chưa nên nói (vẫn bấm để huỷ được). */
+  dimmed?: boolean;
   level: Animated.Value;
   onPress: () => void;
   label: string;
@@ -57,12 +59,51 @@ export function MicButton(props: {
       {ring(1.05, 1.4, 0.35)}
       <Pressable
         onPress={props.onPress}
-        style={[styles.talkBtn, listening && styles.talkBtnActive]}
+        style={[styles.talkBtn, listening && styles.talkBtnActive, props.dimmed && styles.talkBtnDimmed]}
         accessibilityLabel={props.label}
       >
         <MicIcon color={C.ink} size={36} />
       </Pressable>
     </View>
+  );
+}
+
+/**
+ * Ba thanh nhấp nhô lần lượt, màu nhạt: đang kết nối, Gừng CHƯA nghe được. Phải khác hẳn
+ * quả cầu "đang nghĩ" để anh không tưởng Gừng đã nghe mà nói luôn (mất đoạn đầu).
+ */
+export function ConnectingBars() {
+  const clock = useState(() => new Animated.Value(0))[0];
+  const appear = useState(() => new Animated.Value(0))[0];
+
+  useEffect(() => {
+    const animations = [
+      Animated.timing(appear, { toValue: 1, duration: 250, useNativeDriver: true }),
+      Animated.loop(Animated.timing(clock, { toValue: 1, duration: 1200, easing: Easing.linear, useNativeDriver: true })),
+    ];
+    animations.forEach((a) => a.start());
+    return () => animations.forEach((a) => a.stop());
+  }, [clock, appear]);
+
+  return (
+    <Animated.View style={[styles.bars, { opacity: appear }]}>
+      {[0, 1, 2].map((i) => {
+        // Mỗi thanh lệch 1/6 chu kỳ; nửa đầu chu kỳ của nó vươn lên rồi thu về, nửa sau nằm yên.
+        const t = Animated.modulo(Animated.add(clock, 1 - i / 6), 1);
+        return (
+          <Animated.View
+            key={i}
+            style={[
+              styles.bar,
+              {
+                opacity: t.interpolate({ inputRange: [0, 0.25, 0.5, 1], outputRange: [0.45, 1, 0.45, 0.45] }),
+                transform: [{ scaleY: t.interpolate({ inputRange: [0, 0.25, 0.5, 1], outputRange: [0.4, 1, 0.4, 0.4] }) }],
+              },
+            ]}
+          />
+        );
+      })}
+    </Animated.View>
   );
 }
 
@@ -297,6 +338,9 @@ export const styles = StyleSheet.create({
   visual: { width: ORB * 2.4, height: ORB * 2.4, alignItems: 'center', justifyContent: 'center' },
   wave: { width: WAVE_W, height: WAVE_H, overflow: 'hidden' },
   orb: { position: 'absolute', width: ORB, height: ORB, borderRadius: ORB / 2, backgroundColor: C.primary },
+  // Chung chân: các thanh đứng trên cùng một đáy và chỉ vươn lên, như cột sóng âm thanh.
+  bars: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, height: 44 },
+  bar: { width: 10, height: 44, borderRadius: 5, backgroundColor: C.muted, transformOrigin: 'bottom' },
   ripple: { backgroundColor: 'transparent', borderWidth: 3, borderColor: C.primary },
   heard: { fontSize: 17, lineHeight: 24, color: C.muted, fontStyle: 'italic', textAlign: 'center' },
   error: { fontSize: 16, color: C.error, textAlign: 'center' },
@@ -313,6 +357,7 @@ export const styles = StyleSheet.create({
     backgroundColor: C.primary,
   },
   talkBtnActive: { backgroundColor: C.listening },
+  talkBtnDimmed: { opacity: 0.45 },
   unlockBtn: {
     position: 'absolute',
     top: 72,

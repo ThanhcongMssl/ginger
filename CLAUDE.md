@@ -116,6 +116,14 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
 - Cài đặt (`src/Settings.tsx`, nút bánh răng ở header, khoá khi đang trò chuyện): xoá ký ức /
   lịch sử / tất cả, bấm 2 lần để xác nhận (Alert không chạy trên web); bấm vào dòng "Ký ức về anh" mở
   trang danh sách ký ức, nút ✕ xoá từng điều (bấm 1 lần, cho trường hợp Ginger nhớ nhầm). Đã test bằng DB tạm.
+- Lọc tiếng vọng (`is_echo` + `Ginger.stt_node` trong agent.py): khử vọng của iPhone không
+  triệt hết, STT vẫn nghe ra lời Ginger (sai dấu, cụt chữ, số đọc thành chữ số) rồi Ginger tự
+  ngắt lời mình. Đoạn STT bắt đầu lúc Ginger đang nói (hoặc ≤1s sau) bị bỏ nếu ≥60% âm tiết
+  (bỏ dấu) trùng theo đúng thứ tự (LCS) với câu Ginger vừa nói. Một âm tiết lẻ lúc đó cũng bỏ,
+  trừ lời ngắt quen ("thôi", "dừng", "khoan"); bản tạm 1–2 âm tiết thì chờ thêm. Đánh đổi:
+  "ừ", "có" nói ngay trong 1s sau khi Ginger dứt lời bị bỏ qua. Đo bằng client giả trộn 30%
+  giọng Ginger ngược vào micro: Ginger nói liền 70s không tự ngắt (trước đó tự ngắt sau vài
+  giây), chen "Thôi dừng lại" vẫn dừng.
 - Bắt đầu nhanh (web): agent vào phòng mất 3–5s (kết nối từ WSL tới LiveKit India South, đo
   bằng script riêng vẫn 3–4s; gọi agent bằng API dispatch còn chậm hơn ~2s nên không dùng).
   Bản web bật `preConnectBuffer`: micro thu ngay khi kết nối, app hiện "đang nghe" sau ~1s,
@@ -131,6 +139,13 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
 - Tự rảnh tay (native): mở app hoặc quay lại app (AppState 'active') là tự bắt đầu trò chuyện,
   sang app khác ('background') thì kết thúc. Web vẫn phải chạm mic (Safari cần chạm mới phát
   được âm thanh). Chuyển từ chế độ gõ chữ về thì không tự bắt đầu.
+- Lúc vào phòng (`phase` 'connecting' trong LiveVoice.tsx): 3 thanh nâu nhạt chung đáy nhấp nhô
+  (`ConnectingBars`), nút micro mờ, không dùng chữ. Phải khác hẳn quả cầu "đang nghĩ", vì native
+  không có bộ đệm trước khi agent vào: anh tưởng Gừng đang nghe mà nói luôn thì mất đoạn đó.
+  Hết 'connecting' thì rung nhẹ (`expo-haptics`, nạp lười để dev build cũ không lỗi).
+  LiveVoice chỉ có một cây `Layout`; phòng LiveKit là con không vẽ gì, báo trạng thái lên qua
+  `onState`. Vẽ Layout riêng trong phòng thì lúc vào phòng React dựng lại: icon header và
+  hiệu ứng kết nối nháy.
 - Độ trễ mỗi lượt nói: trung vị ~3,0s (từ 3,8s, nhờ bỏ Voyage khỏi đường nóng). Chi tiết từng
   chặng, những gì đã thử không ăn thua và các hướng còn lại (kèm đánh đổi): `docs/do-tre.md`.
 - Chế độ gõ chữ (`src/ChatScreen.tsx`, nút bàn phím ở góc trái header; nút micro để quay lại):

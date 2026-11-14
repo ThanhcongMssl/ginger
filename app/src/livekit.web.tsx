@@ -73,7 +73,8 @@ export function Room({ children, ...props }: RoomProps) {
       connect
       audio={{ echoCancellation: true, noiseSuppression: true, autoGainControl: true }}
       video={false}
-      style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: '100%' }}
+      // Phòng chỉ báo trạng thái lên LiveVoice, không chiếm chỗ trong bố cục.
+      style={{ display: 'contents' }}
     >
       {children}
       {/* Phát giọng Ginger: trên web phải có thẻ audio thật trong trang. */}
