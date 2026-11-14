@@ -130,6 +130,11 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
   voice isolation/tháng (Ship $50: 1.000 phút); hết phút thì chưa rõ LiveKit xử lý ra sao.
   Áp dụng từ phiên sau. Đo bằng client giả: không thêm độ trễ (transcript ~0,8s), không mất đầu
   câu, lọc tiếng vọng và ngắt lời vẫn chạy. Chưa thử với karaoke thật.
+- Gợi ý tên "Gừng" cho STT (`STT_CONTEXT` trong voice.py, agent dùng chung): không có gợi ý thì
+  Soniox hay nghe "Gừng" thành "Dừng", "Rừng", "Hương", "Gương" (log thật: "Gương ơi", "Hương
+  đang làm gì"; "Gừng ơi" trộn ồn → "Dừng ngay"). Đo bằng câu TTS trộn ồn: không gợi ý sai 4/6
+  câu có "Gừng", có gợi ý đúng 6/6; "dừng lại", "đừng", "rừng", "mừng", "Hương" vẫn đúng, chỉ
+  "Gương ơi" thành "Gừng ơi".
 - Bắt đầu nhanh (web): agent vào phòng mất 3–5s (kết nối từ WSL tới LiveKit India South, đo
   bằng script riêng vẫn 3–4s; gọi agent bằng API dispatch còn chậm hơn ~2s nên không dùng).
   Bản web bật `preConnectBuffer`: micro thu ngay khi kết nối, app hiện "đang nghe" sau ~1s,

@@ -25,6 +25,18 @@ log = logging.getLogger("tro-ly.voice")
 STT_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
 TTS_URL = "https://tts-rt.soniox.com/tts"
 
+# Gợi ý cho Soniox STT: "Gừng" làm tên riêng hiếm gặp, gặp tiếng ồn thì hay bị nghe thành
+# "Dừng", "Rừng", "Hương", "Gương" ("Gừng ơi" → "Dừng ngay"). Đo bằng câu TTS trộn ồn: không
+# gợi ý sai 4/6 câu có "Gừng", có gợi ý đúng 6/6; "dừng lại", "đừng", "rừng", "mừng" vẫn đúng.
+STT_CONTEXT = {
+    "general": [
+        {"key": "domain", "value": "trợ lý ảo giọng nói"},
+        {"key": "assistant_name", "value": "Gừng"},
+    ],
+    "text": "Người dùng nói chuyện với trợ lý ảo tên là Gừng, hay gọi: Gừng ơi.",
+    "terms": ["Gừng", "Gừng ơi"],
+}
+
 
 class SttError(Exception):
     pass
@@ -59,6 +71,7 @@ class SttSession:
             "num_channels": channels,
             "language_hints": ["vi", "en"],
             "enable_endpoint_detection": True,
+            "context": STT_CONTEXT,
         }))
         self._reader = asyncio.create_task(self._collect())
 

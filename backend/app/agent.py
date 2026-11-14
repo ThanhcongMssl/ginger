@@ -43,6 +43,7 @@ from . import accounts, chat_models, memory
 from .config import settings
 from .db import init_db
 from .llm import FALLBACK_REPLY, stream_reply
+from .voice import STT_CONTEXT
 
 log = logging.getLogger("tro-ly.agent")
 
@@ -241,6 +242,12 @@ async def entrypoint(ctx: JobContext) -> None:
         stt=soniox.STT(params=soniox.STTOptions(
             model=settings.stt_model,
             language_hints=["vi", "en"],
+            # Cho STT biết tên "Gừng" (xem STT_CONTEXT trong voice.py).
+            context=soniox.ContextObject(
+                general=[soniox.ContextGeneralItem(**g) for g in STT_CONTEXT["general"]],
+                text=STT_CONTEXT["text"],
+                terms=STT_CONTEXT["terms"],
+            ),
             # Bằng đúng tần số audio LiveKit đưa vào (room_io mặc định 24 kHz). Để 16 kHz thì
             # plugin phải resample, bộ resample giữ lại ~1s audio → chốt lượt chậm thêm ~1,1s.
             sample_rate=24000,
