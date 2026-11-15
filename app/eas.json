@@ -16,6 +16,15 @@
       "distribution": "internal",
       "environment": "preview",
       "channel": "preview"
+    },
+    "production": {
+      "distribution": "store",
+      "environment": "preview",
+      "channel": "preview",
+      "autoIncrement": true
     }
+  },
+  "submit": {
+    "production": {}
   }
 }

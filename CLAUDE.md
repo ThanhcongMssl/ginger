@@ -155,6 +155,12 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
   Không chạy thẳng `eas update`: nó đóng gói trên máy và đọc `app/.env` nên nhúng
   `EXPO_PUBLIC_APP_TOKEN` vào bản update (đã thử). `scripts/ota.sh` tắt .env (`EXPO_NO_DOTENV=1`),
   lấy biến từ môi trường EAS `preview`, kiểm tra bundle không có token rồi mới tải lên.
+- Bản App Store/TestFlight: build trên MacBook của anh bằng `bash scripts/build-ios.sh` (trong `app/`,
+  `eas build --local`, profile `production`, không tốn lượt EAS; gói Free chỉ có 15 build iOS/tháng).
+  Script pull code, build .ipa vào `~/ginger-ipa`, soi bundle (có API URL, không có token) rồi
+  `eas submit`. Không build bằng Xcode tay (Metro đọc app/.env → nhúng token). Profile `production` dùng
+  channel `preview` nên OTA tới cả bản TestFlight; eas.json không tính vào fingerprint.
+  Đưa ra ngoài TestFlight nội bộ thì người duyệt Apple vướng `TokenGate`.
 - Tự rảnh tay (native): mở app hoặc quay lại app (AppState 'active') là tự bắt đầu trò chuyện,
   sang app khác ('background') thì kết thúc. Web vẫn phải chạm mic (Safari cần chạm mới phát
   được âm thanh). Chuyển từ chế độ gõ chữ về thì không tự bắt đầu.
