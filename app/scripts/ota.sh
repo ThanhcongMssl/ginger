@@ -17,13 +17,22 @@ trap 'rm -rf "$out"' EXIT
 export EXPO_NO_DOTENV=1
 
 # runtimeVersion theo fingerprint (phần native + app.json + scripts trong package.json + .gitignore).
-# Khác build preview mới nhất thì app đang cài không nhận bản update này: phải build lại.
+# Phải khớp một bản app đang cài thì bản update mới tới được: build preview mới nhất trên EAS, hoặc
+# bản TestFlight mới nhất build trên Mac (scripts/build-ios.sh, .ipa trong ~/ginger-ipa; build local
+# không có runtime trong `eas build:list`, nên đọc file EXUpdates.bundle/fingerprint trong .ipa).
 local_rt=$(npx expo-updates runtimeversion:resolve --platform ios 2>/dev/null | tail -n1 \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["runtimeVersion"])')
 build_rt=$(npx eas-cli build:list --profile preview --platform ios --status finished --limit 1 \
   --json --non-interactive 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["runtime"]["version"])')
-if [ "$local_rt" != "$build_rt" ]; then
-  echo "runtimeVersion $local_rt khác build preview mới nhất ($build_rt): đã đổi phần native, phải build lại." >&2
+ipa=$(ls -t "$HOME"/ginger-ipa/*.ipa 2>/dev/null | head -n1 || true)
+ipa_rt=$([ -n "$ipa" ] && unzip -p "$ipa" 'Payload/*.app/EXUpdates.bundle/fingerprint' 2>/dev/null || true)
+if [ "$local_rt" = "$build_rt" ]; then
+  echo "✓ Khớp build preview mới nhất ($build_rt)."
+elif [ "$local_rt" = "$ipa_rt" ]; then
+  echo "✓ Khớp bản TestFlight mới nhất $(basename "$ipa") ($ipa_rt)."
+else
+  echo "runtimeVersion $local_rt khác build preview ($build_rt) và bản TestFlight mới nhất (${ipa_rt:-không có}):" \
+    "đã đổi phần native, phải build lại." >&2
   exit 1
 fi
 

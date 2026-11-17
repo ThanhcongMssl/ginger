@@ -1,6 +1,6 @@
 /**
  * Nút bánh răng ở header + màn hình Cài đặt. Chọn model và xoá dữ liệu bộ nhớ của Gừng.
- * Xoá phải bấm 2 lần (Alert của React Native không chạy trên web).
+ * Xoá thì hiện popup hỏi lại (tự vẽ bằng Modal, vì Alert của React Native không chạy trên web).
  */
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
@@ -64,7 +64,8 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [removing, setRemoving] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState<Target | null>(null);
+  // Đang hỏi lại trước khi xoá: cả một nhóm dữ liệu, hoặc một ký ức.
+  const [confirming, setConfirming] = useState<{ target: Target } | { memory: Memory } | null>(null);
   const [busy, setBusy] = useState<Target | null>(null);
   // Trang con: danh sách từng ký ức (mở khi bấm vào dòng "Ký ức của Gừng").
   const [page, setPage] = useState<'main' | 'memories'>('main');
@@ -116,20 +117,20 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
     }
   };
 
-  // Bấm lần 1 mà không bấm tiếp trong 4 giây thì thôi.
-  useEffect(() => {
-    if (!confirming) return;
-    const t = setTimeout(() => setConfirming(null), 4000);
-    return () => clearTimeout(t);
-  }, [confirming]);
+  // Bấm "Xoá" mở popup hỏi lại; bấm "Xoá" trong popup mới xoá thật.
+  const press = (target: Target) => {
+    if (!busy) setConfirming({ target });
+  };
 
-  const press = async (target: Target) => {
-    if (busy) return;
-    if (confirming !== target) {
-      setConfirming(target);
-      return;
-    }
+  const confirmDelete = () => {
+    const ask = confirming;
     setConfirming(null);
+    if (!ask) return;
+    if ('memory' in ask) removeMemory(ask.memory.id);
+    else clearTarget(ask.target);
+  };
+
+  const clearTarget = async (target: Target) => {
     setBusy(target);
     try {
       if (target !== 'history') await clearMemories();
@@ -145,7 +146,7 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
     }
   };
 
-  // Xoá một ký ức (vd. Gừng nhớ nhầm): bấm một lần là xoá, mất ít nên không cần xác nhận.
+  // Xoá một ký ức (vd. Gừng nhớ nhầm), sau khi popup hỏi lại.
   const removeMemory = async (id: number) => {
     if (removing !== null) return;
     setRemoving(id);
@@ -176,18 +177,30 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
       </Pressable>
       <Pressable
         onPress={() => press(target)}
-        style={[s.delBtn, confirming === target && s.delBtnConfirm]}
+        style={s.delBtn}
         accessibilityLabel={`${label}: ${title}`}
       >
-        {busy === target ? (
-          <ActivityIndicator color={C.error} />
-        ) : (
-          <Text style={[s.delText, confirming === target && s.delTextConfirm]}>
-            {confirming === target ? 'Chắc chưa?' : label}
-          </Text>
-        )}
+        {busy === target ? <ActivityIndicator color={C.error} /> : <Text style={s.delText}>{label}</Text>}
       </Pressable>
     </View>
+  );
+
+  const dialog = (
+    <ConfirmDialog
+      text={
+        confirming === null
+          ? null
+          : 'memory' in confirming
+            ? {
+                title: 'Xoá ký ức này?',
+                message: `Gừng sẽ quên: “${confirming.memory.content}”`,
+                action: 'Xoá',
+              }
+            : CONFIRM[confirming.target]
+      }
+      onCancel={() => setConfirming(null)}
+      onConfirm={confirmDelete}
+    />
   );
 
   if (page === 'memories') {
@@ -215,7 +228,7 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
                   <View style={s.memRow}>
                     <Text style={s.memText}>{m.content}</Text>
                     <Pressable
-                      onPress={() => removeMemory(m.id)}
+                      onPress={() => removing === null && setConfirming({ memory: m })}
                       hitSlop={8}
                       style={s.memDel}
                       accessibilityLabel={`Xoá ký ức: ${m.content}`}
@@ -234,6 +247,7 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
           <Text style={s.note}>Gừng nhớ nhầm điều gì thì bấm ✕ để xoá điều đó.</Text>
           {error && <Text style={ui.error}>{error}</Text>}
         </ScrollView>
+        {dialog}
       </SafeAreaView>
     );
   }
@@ -275,7 +289,6 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
             })
           )}
         </View>
-        <Text style={s.note}>Luôn dùng bản mới nhất của dòng đã chọn. Áp dụng từ câu hỏi tiếp theo.</Text>
 
         <Text style={s.section}>NGHE</Text>
         <View style={s.card}>
@@ -320,7 +333,68 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
         {/* Mỗi máy một tài khoản; mã này để tra tài khoản trong DB khi cần. */}
         <Text style={s.deviceId}>Mã thiết bị: {getDeviceId().slice(0, 8)}</Text>
       </ScrollView>
+      {dialog}
     </SafeAreaView>
+  );
+}
+
+type DialogText = { title: string; message: string; action: string };
+
+const CONFIRM: Record<Target, DialogText> = {
+  memories: {
+    title: 'Xoá hết ký ức?',
+    message: 'Gừng sẽ quên mọi điều đã nhớ. Không khôi phục được.',
+    action: 'Xoá',
+  },
+  history: {
+    title: 'Xoá lịch sử trò chuyện?',
+    message: 'Mọi cuộc trò chuyện và bản tóm tắt sẽ bị xoá. Không khôi phục được.',
+    action: 'Xoá',
+  },
+  all: {
+    title: 'Xoá tất cả?',
+    message: 'Gừng sẽ quên hết mọi chuyện: ký ức, lịch sử và bản tóm tắt. Không khôi phục được.',
+    action: 'Xoá hết',
+  },
+};
+
+/** Popup hỏi lại trước khi xoá. Tự vẽ bằng Modal vì Alert của React Native không chạy trên web. */
+function ConfirmDialog({
+  text: current,
+  onCancel,
+  onConfirm,
+}: {
+  text: DialogText | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  // Giữ nội dung lúc popup đang mờ dần sau khi đóng.
+  const [shown, setShown] = useState<DialogText>(current ?? CONFIRM.all);
+  if (current && current.title + current.message !== shown.title + shown.message) setShown(current);
+  const text = current ?? shown;
+  return (
+    <Modal visible={current !== null} transparent animationType="fade" onRequestClose={onCancel}>
+      <Pressable style={s.backdrop} onPress={onCancel} accessibilityLabel="Huỷ">
+        <Pressable style={s.dialog} accessibilityRole="alert">
+          <Text style={s.dialogTitle}>{text.title}</Text>
+          <Text style={s.dialogMessage}>{text.message}</Text>
+          <View style={s.dialogButtons}>
+            <Pressable
+              onPress={onCancel}
+              style={({ pressed }) => [s.dialogBtn, s.dialogCancel, pressed && s.rowPressed]}
+            >
+              <Text style={s.dialogCancelText}>Huỷ</Text>
+            </Pressable>
+            <Pressable
+              onPress={onConfirm}
+              style={({ pressed }) => [s.dialogBtn, s.dialogDelete, pressed && s.rowPressed]}
+            >
+              <Text style={s.dialogDeleteText}>{text.action}</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -351,9 +425,23 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.error,
   },
-  delBtnConfirm: { backgroundColor: C.error },
   delText: { fontSize: 15, fontWeight: '600', color: C.error },
-  delTextConfirm: { color: '#FFFFFF' },
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+  },
+  dialog: { width: '100%', maxWidth: 340, backgroundColor: '#FFFFFF', borderRadius: 18, padding: 20, gap: 8 },
+  dialogTitle: { fontSize: 18, fontWeight: '600', color: C.ink, textAlign: 'center' },
+  dialogMessage: { fontSize: 15, lineHeight: 21, color: C.muted, textAlign: 'center' },
+  dialogButtons: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  dialogBtn: { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12 },
+  dialogCancel: { backgroundColor: C.line },
+  dialogCancelText: { fontSize: 16, fontWeight: '600', color: C.ink },
+  dialogDelete: { backgroundColor: C.error },
+  dialogDeleteText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
   note: { fontSize: 13, color: C.muted, marginLeft: 4 },
   back: { position: 'absolute', left: 10, top: 0, bottom: 0, justifyContent: 'center' },
   rowOpen: { flexDirection: 'row', alignItems: 'center', gap: 8 },

@@ -114,8 +114,9 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
   Web cần `webAudioMix` (Safari iOS bỏ qua audio.volume) với AudioContext tạo ngay lúc chạm mic;
   âm lượng micro tính RMS tuyến tính (`useAudioLevel`) cho cùng thang với native.
 - Cài đặt (`src/Settings.tsx`, nút bánh răng ở header, khoá khi đang trò chuyện): xoá ký ức /
-  lịch sử / tất cả, bấm 2 lần để xác nhận (Alert không chạy trên web); bấm vào dòng "Ký ức về anh" mở
-  trang danh sách ký ức, nút ✕ xoá từng điều (bấm 1 lần, cho trường hợp Ginger nhớ nhầm). Đã test bằng DB tạm.
+  lịch sử / tất cả; bấm vào dòng "Ký ức của Gừng" mở trang danh sách ký ức, nút ✕ xoá từng điều (cho
+  trường hợp Gừng nhớ nhầm). Mọi nút xoá đều mở popup hỏi lại (`ConfirmDialog`, tự vẽ bằng Modal vì Alert
+  không chạy trên web). Đã test bằng DB tạm.
 - Lọc tiếng vọng (`is_echo` + `Ginger.stt_node` trong agent.py): khử vọng của iPhone không
   triệt hết, STT vẫn nghe ra lời Ginger (sai dấu, cụt chữ, số đọc thành chữ số) rồi Ginger tự
   ngắt lời mình. Đoạn STT bắt đầu lúc Ginger đang nói (hoặc ≤1s sau) bị bỏ nếu ≥60% âm tiết
