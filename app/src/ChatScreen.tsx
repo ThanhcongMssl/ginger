@@ -5,8 +5,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Animated,
-  Keyboard,
   Platform,
   Pressable,
   ScrollView,
@@ -16,45 +14,16 @@ import {
   View,
   type ScrollViewInstance,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { getMessages, sendChat, type ChatMessage } from './api';
 import { conversation } from './conversation';
 import { GingerPlant } from './GingerPlant';
+import { KeyboardSpace } from './keyboard';
 import { SettingsButton } from './Settings';
 import { C, HeaderButton, Logo, MicIcon, SendIcon, styles as ui } from './ui';
 
-/**
- * Chỗ trống bằng phần bàn phím che (trừ vùng an toàn đáy), dâng lên cùng lúc với bàn phím.
- * Không dùng KeyboardAvoidingView: nó đặt đệm qua LayoutAnimation sau một vòng JS nên khung
- * nhập chữ lên chậm hơn bàn phím. Ở đây chạy theo sự kiện "will" (trước khi bàn phím bắt đầu
- * chạy) bằng lò xo giống đường cong bàn phím iOS. Android tự co cửa sổ (adjustResize).
- */
-function useKeyboardSpace() {
-  const { bottom } = useSafeAreaInsets();
-  const space = useState(() => new Animated.Value(0))[0];
-  useEffect(() => {
-    if (Platform.OS !== 'ios') return;
-    const to = (value: number) =>
-      Animated.spring(space, {
-        toValue: value,
-        mass: 3,
-        stiffness: 1000,
-        damping: 500,
-        overshootClamping: true,
-        useNativeDriver: false,
-      }).start();
-    const subs = [
-      Keyboard.addListener('keyboardWillShow', (e) => to(Math.max(e.endCoordinates.height - bottom, 0))),
-      Keyboard.addListener('keyboardWillHide', () => to(0)),
-    ];
-    return () => subs.forEach((sub) => sub.remove());
-  }, [space, bottom]);
-  return space;
-}
-
 export default function ChatScreen({ onVoiceMode }: { onVoiceMode: () => void }) {
-  const keyboardSpace = useKeyboardSpace();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(conversation.current !== null);
   const [input, setInput] = useState('');
@@ -205,7 +174,7 @@ export default function ChatScreen({ onVoiceMode }: { onVoiceMode: () => void })
           )}
         </View>
       </View>
-      <Animated.View style={{ height: keyboardSpace }} />
+      <KeyboardSpace />
     </SafeAreaView>
   );
 }

@@ -183,6 +183,8 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
 - Chế độ gõ chữ (`src/ChatScreen.tsx`, nút bàn phím ở góc trái header; nút micro để quay lại):
   stream qua `POST /chat`. Hai chế độ dùng chung cuộc trò chuyện (`src/conversation.ts`),
   mở chat thì tải lại tin của cuộc đang mở (cả lượt nói). Web: Enter gửi, Shift+Enter xuống dòng.
+  Chỗ trống dưới khung nhập chữ theo bàn phím bằng `react-native-keyboard-controller` (`src/keyboard.tsx`,
+  chạy trên UI thread nên lên cùng nhịp bàn phím; `Animated.spring` theo `keyboardWillShow` thì lên chậm hơn).
   Đang trả lời thì nút gửi thành nút dừng (AbortController); backend vẫn lưu phần đã trả lời
   (uvicorn báo ASGI 2.3 nên Starlette huỷ stream rồi vẫn chạy BackgroundTask).
   Đã test bằng Chromium với Claude thật.

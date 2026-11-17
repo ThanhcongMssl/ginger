@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import ChatScreen from './src/ChatScreen';
 import ExpoGoVoice from './src/ExpoGoVoice';
+import { KeyboardProvider } from './src/keyboard';
 import TokenGate from './src/TokenGate';
 
 // Expo Go không có native module của LiveKit (WebRTC), nên chỉ nạp LiveVoice ở dev build.
@@ -22,14 +23,16 @@ export default function App() {
   if (!fontsLoaded) return null;
   return (
     <SafeAreaProvider>
-      <StatusBar style="dark" />
-      <TokenGate>
-        {mode === 'voice' ? (
-          <VoiceScreen onTextMode={() => setMode('text')} />
-        ) : (
-          <ChatScreen onVoiceMode={() => setMode('voice')} />
-        )}
-      </TokenGate>
+      <KeyboardProvider>
+        <StatusBar style="dark" />
+        <TokenGate>
+          {mode === 'voice' ? (
+            <VoiceScreen onTextMode={() => setMode('text')} />
+          ) : (
+            <ChatScreen onVoiceMode={() => setMode('voice')} />
+          )}
+        </TokenGate>
+      </KeyboardProvider>
     </SafeAreaProvider>
   );
 }
