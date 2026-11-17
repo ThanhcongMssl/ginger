@@ -75,7 +75,7 @@ export default function TokenGate({ children }: { children: ReactNode }) {
           secureTextEntry
           autoCapitalize="none"
           autoCorrect={false}
-          placeholder="APP_TOKEN"
+          placeholder="Token"
           placeholderTextColor={C.muted}
           style={styles.gateInput}
         />
