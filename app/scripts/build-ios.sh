@@ -29,6 +29,8 @@ for a in "$@"; do
 done
 
 die() { echo "✗ $*" >&2; exit 1; }
+# pod/fastlane bản Homebrew tự mang gem riêng; GEM_PATH của rvm lọt vào thì pod lỗi "Could not find 'base64'".
+unset GEM_PATH GEM_HOME
 [ "$(uname)" = Darwin ] || die "Script này chạy trên macOS."
 for t in xcodebuild pod fastlane node npx git unzip; do
   command -v "$t" >/dev/null || die "Thiếu $t (xem phần cần cài ở đầu script)."
