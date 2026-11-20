@@ -188,6 +188,15 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
   LiveVoice chỉ có một cây `Layout`; phòng LiveKit là con không vẽ gì, báo trạng thái lên qua
   `onState`. Vẽ Layout riêng trong phòng thì lúc vào phòng React dựng lại: icon header và
   hiệu ứng kết nối nháy.
+- Câu còn dở (`looks_incomplete` + `Ginger.stt_node` trong agent.py): Soniox chốt lượt sau ~0,5s im, anh ngập
+  ngừng là câu vỡ thành nhiều tin ("Thì." "Cái." "Trong." "Game."), Gừng trả lời chen rồi bị ngắt (log thật: 6/15
+  lần gọi Claude bị bỏ). Đoạn STT vừa chốt mà dừng ở chữ nối (là, thì, của, trong…), toàn tiếng đệm (à, ờ), có
+  dấu phẩy cuối, hoặc mẩu cuối chỉ 1–2 chữ không nằm trong danh sách câu ngắn trọn vẹn (có, không, đúng rồi,
+  thôi, bao nhiêu…) thì đặt `min_delay` 2,0s thay vì 0 (`session.update_options` ngay trước khi đưa
+  END_OF_SPEECH cho LiveKit); nói tiếp trong lúc chờ là LiveKit huỷ lượt chốt và gộp câu. So chữ giữ nguyên dấu.
+  Đo bằng client giả nói "Anh muốn hỏi là / à / thủ đô của / nước Úc là thành phố nào?" cách 0,7–0,9s: trước
+  4 tin + Gừng chen; 1,5s vẫn tách; 2,0s: một lần gộp trọn 1 tin, một lần 2 tin (Soniox cắt "À, thủ đô." trông
+  như câu trọn). Câu trọn bị nhận nhầm là dở thì chậm thêm ~1,2s.
 - Tắt DTX cho track giọng Ginger (`AudioOutputOptions` trong agent.py): để DTX thì hễ im là agent
   chỉ gửi gói tiếng ồn nền (50 → 4 gói/giây) và iPhone kêu "bụp" ngay khi dứt chữ cuối. Âm Soniox
   và âm nhận qua LiveKit đều kết thúc sạch (đã đo).

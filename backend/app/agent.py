@@ -65,6 +65,31 @@ ECHO_KEEP_SEC = 3.0
 ECHO_MATCH = 0.6
 # Lời ngắt quen thuộc (đã bỏ dấu), đủ để dừng Ginger dù chỉ 1–2 âm tiết.
 _STOP_WORDS = {"thoi", "dung", "ngung", "khoan", "stop", "im", "lai"}
+# Câu còn dở: Soniox chốt lượt sau ~0,5s im lặng, anh ngập ngừng ("Thì…", "à…", "trong game…")
+# là Gừng trả lời luôn rồi bị ngắt, câu hỏi vỡ thành nhiều tin. Câu chốt mà trông còn dở thì
+# chờ thêm: hễ nói tiếp trong lúc chờ là LiveKit huỷ lượt chốt, gộp vào cùng một câu.
+# Tính từ lúc ngừng nói; endpoint của Soniox tới sau ~0,8s nên thực tế chờ thêm ~1,2s (1,5s thì
+# chỉ còn ~0,7s: nói tiếp sau 0,7s vẫn bị chốt, đo bằng client giả).
+INCOMPLETE_COMMIT_DELAY = 2.0
+# Câu dừng ở mấy chữ này thì gần như chắc còn tiếp. So nguyên dấu ("sau" ≠ "sáu", "ở" ≠ "ô").
+_TRAILING_WORDS = {
+    "là", "thì", "mà", "của", "và", "với", "nhưng", "hoặc", "để", "cho", "khi", "nếu", "vì",
+    "tại", "trong", "ngoài", "ở", "về", "từ", "đến", "tới", "những", "các", "một", "cái",
+    "kiểu", "như", "bằng", "theo", "sau", "trước", "giữa", "trên", "dưới", "rằng", "xem",
+    "à", "ờ", "ơ", "ừm", "um", "uh", "ah",
+}
+# Câu 1–2 chữ vẫn trọn vẹn: trả lời, đồng ý, ngắt lời, cảm thán.
+_SHORT_COMPLETE = {
+    "có", "không", "ừ", "ừ ừ", "vâng", "dạ", "ok", "oke", "okay", "ok em", "đúng", "đúng rồi",
+    "phải", "không phải", "rồi", "được", "được rồi", "thôi", "dừng", "dừng lại", "ngừng", "khoan",
+    "stop", "cảm ơn", "cảm ơn em", "chào", "chào em", "hay", "hay quá", "tốt", "sai", "chưa",
+    "biết rồi", "xong", "xong rồi", "tiếp", "tiếp đi", "đi", "hả", "gì", "sao", "sao thế",
+    "thế à", "vậy à", "thật à", "ồ", "wow", "tạm biệt", "bye",
+    # đuôi câu hỏi hay bị Soniox tách thành mẩu riêng ("Giá vàng hôm nay. Bao nhiêu?")
+    "bao nhiêu", "là gì", "thế nào", "ra sao", "ở đâu", "khi nào", "lúc nào", "tại sao", "vì sao",
+    "được không", "phải không", "đúng không", "không em", "nhé", "nha", "nhé em",
+}
+_FILLERS = {"à", "ờ", "ơ", "ừm", "um", "uh", "ah", "thì", "là", "mà"}
 _TRANSCRIPTS = (
     stt.SpeechEventType.INTERIM_TRANSCRIPT,
     stt.SpeechEventType.PREFLIGHT_TRANSCRIPT,
@@ -106,6 +131,25 @@ def _common_in_order(a: list[str], b: list[str]) -> int:
     return prev[-1]
 
 
+def looks_incomplete(text: str) -> bool:
+    """Đoạn người dùng vừa nói (một lần STT chốt) có vẻ còn dở, nên chờ thêm rồi mới trả lời."""
+    stripped = text.strip()
+    words = re.findall(r"\w+", unicodedata.normalize("NFC", stripped.lower()))
+    if not words:
+        return False
+    if stripped.endswith((",", "…", "...")):
+        return True
+    if all(w in _FILLERS for w in words):
+        return True
+    if words[-1] in _TRAILING_WORDS:
+        return True
+    # Soniox ghi chỗ ngập ngừng thành "…"/dấu chấm ngay trong đoạn ("Thủ đô của... Nước."):
+    # xét mẩu sau cùng, mẩu 1–2 chữ lạ thì còn dở.
+    pieces = [p for p in re.split(r"(?:\.\.\.|…|[.?!])", stripped.lower()) if re.search(r"\w", p)]
+    last = re.findall(r"\w+", unicodedata.normalize("NFC", pieces[-1])) if pieces else words
+    return len(last) <= 2 and " ".join(last) not in _SHORT_COMPLETE
+
+
 def is_echo(heard: str, said: str, final: bool) -> bool:
     words, ref = _syllables(heard), _syllables(said)
     if not words or not ref:
@@ -145,6 +189,8 @@ class Ginger(Agent):
         self._speaking = False
         self._spoke_until = 0.0
         self._segment_may_echo = False
+        # Đoạn STT vừa chốt, từ lần endpoint trước tới giờ (xem looks_incomplete).
+        self._segment_text = ""
         # Gọi một lần khi âm thanh thật từ micro bắt đầu tới (xem _watch_mic).
         self.on_mic_ready: Callable[[], None] = lambda: None
         self._mic_ready = False
@@ -185,6 +231,17 @@ class Ginger(Agent):
                         if final:
                             log.info("Bỏ tiếng vọng: %r", ev.alternatives[0].text)
                         continue
+                if ev.type == stt.SpeechEventType.FINAL_TRANSCRIPT and ev.alternatives:
+                    self._segment_text = f"{self._segment_text} {ev.alternatives[0].text}".strip()
+                elif ev.type == stt.SpeechEventType.END_OF_SPEECH:
+                    # Đặt trước khi LiveKit nhận END_OF_SPEECH: nó đọc min_delay lúc bắt đầu chờ chốt.
+                    wait = looks_incomplete(self._segment_text)
+                    if wait:
+                        log.info("Câu còn dở, chờ thêm: %r", self._segment_text)
+                    self._segment_text = ""
+                    self.session.update_options(
+                        endpointing_opts={"min_delay": INCOMPLETE_COMMIT_DELAY if wait else 0.0}
+                    )
             yield ev
 
     async def on_user_turn_completed(self, turn_ctx: llm.ChatContext, new_message: llm.ChatMessage) -> None:
