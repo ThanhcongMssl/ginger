@@ -46,8 +46,16 @@ rất phiền khi đang nói chuyện bằng giọng.
 - Ngoại lệ duy nhất: yêu cầu thiếu thông tin tới mức không làm được (ví dụ "dịch
   giúp câu này" mà không nói câu nào) thì hỏi đúng một câu ngắn.
 
-Bạn chỉ trò chuyện được: chưa đặt được lời nhắc, báo thức, lịch hay làm việc gì trên
-máy. Được nhờ những việc đó thì nói thật ngắn gọn là chưa làm được.
+Bạn tìm được trên web bằng công cụ web_search. Chỉ tìm khi câu hỏi cần thông tin mới
+hoặc hay thay đổi mà bạn không chắc: tin tức, thời tiết, giá cả, tỉ giá, kết quả thể
+thao, lịch chiếu, sự kiện gần đây. Kiến thức chung, chuyện trò, lời khuyên thì trả lời
+luôn, không tìm.
+- Trước khi tìm, nói một câu dẫn thật ngắn như "Để Gừng xem nhé." rồi mới tìm.
+- Kể lại kết quả ngắn gọn theo văn nói; không đọc địa chỉ trang web, chỉ nêu tên nguồn
+  khi cần thiết.
+
+Ngoài tìm kiếm, bạn chưa đặt được lời nhắc, báo thức, lịch hay làm việc gì trên máy.
+Được nhờ những việc đó thì nói thật ngắn gọn là chưa làm được.
 - Không dùng markdown, gạch đầu dòng, bảng, emoji hay ký hiệu đặc biệt.
 - Viết số, đơn vị, ngày tháng theo cách đọc được.
 - Không chắc thì nói thật là không chắc.
@@ -115,24 +123,55 @@ def _merge_same_role(messages: list[dict]) -> list[dict]:
     return out
 
 
+# Tìm web bằng server tool: Anthropic tự tìm và đưa kết quả cho Claude, backend không phải
+# chạy vòng tool. Danh sách tools phải cố định (nằm đầu prompt, đổi là lệch prompt cache).
+WEB_SEARCH = {
+    "type": "web_search_20250305",
+    "name": "web_search",
+    "max_uses": 2,
+    # Không ghi country: API báo "Country code VN is not supported".
+    "user_location": {"type": "approximate", "timezone": "Asia/Ho_Chi_Minh"},
+}
+MAX_PAUSES = 3
+
+
 async def stream_reply(context: PromptContext, messages: list[dict]) -> AsyncIterator[str]:
     model = context.model
-    async with claude.messages.stream(
-        model=model.id,
-        max_tokens=1024,
-        system=system_prompt(context),
-        messages=build_messages(context, messages),
-        # Tắt thinking + effort thấp tuỳ model (chat_models._params). Để mặc định
-        # (adaptive + effort high) thì Sonnet chờ ~4s mới ra chữ đầu.
-        **model.params,
-    ) as stream:
-        async for text in stream.text_stream:
-            yield text
-        u = (await stream.get_final_message()).usage
+    msgs = build_messages(context, messages)
+    # Câu dẫn ("Để Gừng xem nhé.") và câu trả lời sau khi tìm là hai khối chữ tách nhau bởi
+    # khối tool: chèn dấu cách, không thì dính liền. Khối chữ kèm trích dẫn liền nhau thì nối thẳng.
+    said, after_tool = False, False
+    for _ in range(MAX_PAUSES + 1):
+        async with claude.messages.stream(
+            model=model.id,
+            max_tokens=1024,
+            system=system_prompt(context),
+            messages=msgs,
+            tools=[WEB_SEARCH],
+            # Tắt thinking + effort thấp tuỳ model (chat_models._params). Để mặc định
+            # (adaptive + effort high) thì Sonnet chờ ~4s mới ra chữ đầu.
+            **model.params,
+        ) as stream:
+            async for ev in stream:
+                if ev.type == "content_block_start" and ev.content_block.type not in ("text", "thinking"):
+                    after_tool = True
+                elif ev.type == "content_block_delta" and ev.delta.type == "text_delta":
+                    if after_tool and said:
+                        yield " "
+                    after_tool = False
+                    said = True
+                    yield ev.delta.text
+            final = await stream.get_final_message()
+        u = final.usage
+        n = u.server_tool_use.web_search_requests if u.server_tool_use else 0
         log.info(
-            "Claude usage (%s): input %s, cache read %s, cache write %s, output %s",
-            model.id, u.input_tokens, u.cache_read_input_tokens, u.cache_creation_input_tokens, u.output_tokens,
+            "Claude usage (%s): input %s, cache read %s, cache write %s, output %s, web search %s",
+            model.id, u.input_tokens, u.cache_read_input_tokens, u.cache_creation_input_tokens, u.output_tokens, n,
         )
+        # Vòng tìm kiếm phía server chạy quá lâu thì API dừng giữa chừng: gửi lại để làm tiếp.
+        if final.stop_reason != "pause_turn":
+            break
+        msgs = [*msgs, {"role": "assistant", "content": final.content}]
 
 
 async def complete(prompt: str, max_tokens: int = 500) -> str:

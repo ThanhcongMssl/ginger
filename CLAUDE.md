@@ -29,6 +29,12 @@ App mobile trợ lý ảo dựa trên AI:
   - Gừng chỉ hỏi lại khi yêu cầu thiếu thông tin tới mức không làm được.
   - Đo bằng 8 câu kể chuyện / câu hỏi, prompt cũ: 5/7 câu kể chuyện bị hỏi ngược; prompt mới: 0/7.
   - Gừng chưa đặt được nhắc việc hay báo thức, được nhờ thì nói thật là chưa làm được.
+- Tìm web (`WEB_SEARCH` trong llm.py): server tool `web_search_20250305` của Anthropic, `max_uses` 2,
+  dùng cho cả nói và gõ chữ. Prompt dặn chỉ tìm khi cần thông tin mới (tin tức, giá, thời tiết…) và nói
+  câu dẫn "Để Gừng xem nhé." trước khi tìm. Đo (Sonnet): câu cần tìm chữ đầu ~1–2s, xong ~4s, lặng ~2,7s
+  sau câu dẫn, input ~18–20 nghìn token/lượt tìm (+10 USD/1.000 lượt); câu không cần tìm thì không tìm.
+  Bản `web_search_20260209` (lọc kết quả bằng code) bị loại: chậm gấp 2–3 lần, gần gấp đôi token, và đọc
+  cả lời tự nói nội bộ ("Kết quả trả về không đúng dạng dự kiến…"). `user_location` không nhận country VN.
 - Xưng hô (`PERSONA` trong backend/app/llm.py): trợ lý tự xưng "Gừng", mặc định gọi người
   dùng là "anh". Không có màn cài đặt: người dùng nói "gọi tôi là chị/bạn…" thì Gừng đổi ngay,
   và ký ức lưu thành câu cố định "Người dùng muốn được gọi là …"
