@@ -205,6 +205,12 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
   Windows `netsh portproxy` 8000 → IP WSL (đổi sau mỗi lần reboot)
 - Expo CLI đăng nhập bằng `EXPO_TOKEN` trong `~/.zshrc`; chạy `npx expo start --tunnel`
   (dev build: thêm `--dev-client`)
+- Tự khởi động sau khi bật máy (`scripts/autostart/install.sh`, chạy một lần): backend và agent là
+  dịch vụ systemd user `ginger-backend` / `ginger-agent` (linger, tự chạy lại khi chết); task Windows
+  "Ginger" lúc đăng nhập giữ WSL chạy và trỏ portproxy 8000 sang IP WSL mới; Postgres
+  `restart: unless-stopped`, Docker Desktop tự mở (lên sau WSL nên `init_db` chờ Postgres tối đa 3 phút;
+  uvicorn `--reload` giữ process cha khi app lỗi khởi động, systemd không biết mà chạy lại). Sửa agent.py thì `systemctl --user restart
+  ginger-agent`; log: `journalctl --user -u ginger-agent`. Muốn chạy tay thì `systemctl --user stop` trước.
 - Agent LiveKit: `python -m app.agent dev` (process riêng, cạnh uvicorn); cần `LIVEKIT_URL`,
   `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` trong `backend/.env` — anh tự điền.
 - API key (`ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, `SONIOX_API_KEY`) do anh tự điền vào `backend/.env`.

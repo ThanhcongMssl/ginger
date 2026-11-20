@@ -18,6 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { getMessages, sendChat, type ChatMessage } from './api';
 import { conversation } from './conversation';
+import { friendlyError } from './errors';
 import { GingerPlant } from './GingerPlant';
 import { KeyboardSpace } from './keyboard';
 import { SettingsButton } from './Settings';
@@ -40,7 +41,7 @@ export default function ChatScreen({ onVoiceMode }: { onVoiceMode: () => void })
     if (!id) return;
     getMessages(id)
       .then(setMessages)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Không tải được tin nhắn'))
+      .catch((e) => setError(friendlyError(e, 'Không tải được tin nhắn')))
       .finally(() => setLoading(false));
   }, []);
 
@@ -69,7 +70,7 @@ export default function ChatScreen({ onVoiceMode }: { onVoiceMode: () => void })
         setMessages((m) => (m[m.length - 1]?.content ? m : m.slice(0, -1)));
         return;
       }
-      setError(e instanceof Error ? e.message : 'Không gửi được');
+      setError(friendlyError(e, 'Không gửi được'));
       // Bỏ tin trống của Ginger, trả lại chữ vào ô nhập để anh gửi lại.
       setMessages((m) => (m[m.length - 1]?.content ? m : m.slice(0, -2)));
       setInput(text);

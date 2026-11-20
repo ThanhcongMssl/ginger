@@ -13,6 +13,7 @@ import { Animated, AppState, Platform, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { getLiveKitToken } from './api';
+import { MSG_NETWORK, friendlyError } from './errors';
 import { SettingsButton } from './Settings';
 import {
   PRECONNECT_BUFFER,
@@ -64,7 +65,7 @@ export default function LiveVoice({ onTextMode }: { onTextMode: () => void }) {
       if (id === attempt.current) setConn({ ...c, attempt: id });
     } catch (e) {
       if (id !== attempt.current) return;
-      setError(e instanceof Error ? e.message : 'Không kết nối được');
+      setError(friendlyError(e, MSG_NETWORK));
       setStarting(false);
       stopAudio();
     }
@@ -151,7 +152,7 @@ export default function LiveVoice({ onTextMode }: { onTextMode: () => void }) {
           onError={(e) => {
             // Anh huỷ lúc đang kết nối: LiveKit báo "Client initiated disconnect", không phải lỗi.
             if (conn.attempt !== attempt.current) return;
-            setError(e.message);
+            setError(friendlyError(e, MSG_NETWORK));
             end();
           }}
         >
@@ -347,11 +348,16 @@ function Layout(props: {
           </View>
           <View style={styles.caption}>
             {heard ? <Text style={styles.heard} numberOfLines={4}>{heard}</Text> : null}
-            {error && <Text style={styles.error}>{error}</Text>}
           </View>
         </View>
 
         <View style={styles.footer}>
+          {/* Lỗi nằm trên phần đất, ngay trên nút micro: không đè lên cây gừng. */}
+          {error && (
+            <Text style={styles.footerError} numberOfLines={2}>
+              {error}
+            </Text>
+          )}
           <MicButton
             listening={phase === 'listening'}
             dimmed={phase === 'connecting'}

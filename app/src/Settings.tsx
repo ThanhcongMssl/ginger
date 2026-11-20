@@ -21,6 +21,7 @@ import {
   type ModelFamily,
 } from './api';
 import { getDeviceId } from './config';
+import { friendlyError } from './errors';
 import { BackIcon, C, GearIcon, styles as ui } from './ui';
 
 type Props = {
@@ -77,7 +78,7 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
       setMemories(mem);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Không kết nối được server');
+      setError(friendlyError(e, 'Không kết nối được server'));
     }
   }, []);
 
@@ -88,7 +89,7 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
         setMemories(mem);
         setSettings(set);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : 'Không kết nối được server'));
+      .catch((e) => setError(friendlyError(e, 'Không kết nối được server')));
   }, []);
 
   // Đổi ngay trên giao diện; lưu lỗi thì quay về lựa chọn cũ.
@@ -101,7 +102,7 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
       setError(null);
     } catch (e) {
       setSettings((cur) => (cur ? { ...cur, model: before } : cur));
-      setError(e instanceof Error ? e.message : 'Không lưu được');
+      setError(friendlyError(e, 'Không lưu được'));
     }
   };
 
@@ -113,7 +114,7 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
       setError(null);
     } catch (e) {
       setSettings((cur) => (cur ? { ...cur, voice_isolation: !on } : cur));
-      setError(e instanceof Error ? e.message : 'Không lưu được');
+      setError(friendlyError(e, 'Không lưu được'));
     }
   };
 
@@ -140,7 +141,7 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
       }
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Xoá không được');
+      setError(friendlyError(e, 'Xoá không được'));
     } finally {
       setBusy(null);
     }
@@ -155,7 +156,7 @@ function SettingsSheet({ onClose, onHistoryCleared }: { onClose: () => void; onH
       setMemories((m) => m?.filter((x) => x.id !== id) ?? null);
       setStats((st) => (st ? { ...st, memories: st.memories - 1 } : st));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Xoá không được');
+      setError(friendlyError(e, 'Xoá không được'));
     } finally {
       setRemoving(null);
     }

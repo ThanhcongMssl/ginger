@@ -10,6 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { checkAppToken } from './api';
 import { getAppToken, getDeviceId, loadAppToken, loadDeviceId, setAppToken } from './config';
+import { friendlyError } from './errors';
 import { C, Logo, styles } from './ui';
 
 export default function TokenGate({ children }: { children: ReactNode }) {
@@ -55,7 +56,7 @@ export default function TokenGate({ children }: { children: ReactNode }) {
         setError('Token không đúng');
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Không kết nối được server');
+      setError(friendlyError(e, 'Không kết nối được server'));
     } finally {
       setChecking(false);
     }

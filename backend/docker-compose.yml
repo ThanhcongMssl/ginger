@@ -1,6 +1,7 @@
 services:
   db:
     image: pgvector/pgvector:pg17
+    restart: unless-stopped  # Docker Desktop mở lúc đăng nhập Windows là Postgres lên theo
     environment:
       POSTGRES_USER: troly
       POSTGRES_PASSWORD: troly

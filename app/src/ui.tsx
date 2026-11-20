@@ -361,6 +361,7 @@ export const styles = StyleSheet.create({
   ripple: { backgroundColor: 'transparent', borderWidth: 3, borderColor: C.primary },
   heard: { fontSize: 17, lineHeight: 24, color: C.muted, fontStyle: 'italic', textAlign: 'center' },
   error: { fontSize: 16, color: C.error, textAlign: 'center' },
+  footerError: { position: 'absolute', top: 6, left: 24, right: 24, fontSize: 15, lineHeight: 20, color: C.error, textAlign: 'center' },
   // Chừa chỗ cho quầng sáng quanh nút micro (phồng tới ~1,9 lần).
   footer: { alignItems: 'center', paddingBottom: 56, paddingTop: 48 },
   micWrap: { alignItems: 'center', justifyContent: 'center' },

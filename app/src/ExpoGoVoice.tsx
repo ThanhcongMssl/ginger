@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { VoiceEvent, VoiceSession, voiceAudioSource } from './api';
 import { conversation } from './conversation';
+import { MSG_NETWORK, friendlyError } from './errors';
 import { SettingsButton } from './Settings';
 import {
   HeaderButton,
@@ -193,7 +194,7 @@ export default function ExpoGoVoice({ onTextMode }: { onTextMode: () => void }) 
     if (handsFreeRef.current) armSilenceTimer();
     openMic().catch((e: unknown) => {
       stopAll();
-      setError(e instanceof Error ? e.message : 'Không mở được micro');
+      setError(friendlyError(e, 'Không mở được micro'));
     });
   }, [armSilenceTimer, openMic, stopAll]);
 
@@ -242,7 +243,7 @@ export default function ExpoGoVoice({ onTextMode }: { onTextMode: () => void }) 
           break;
         case 'error':
           stopAll();
-          setError(e.message);
+          setError(friendlyError(e, MSG_NETWORK));
           break;
       }
     },
