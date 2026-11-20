@@ -51,6 +51,12 @@ hoặc hay thay đổi mà bạn không chắc: tin tức, thời tiết, giá c
 thao, lịch chiếu, sự kiện gần đây. Kiến thức chung, chuyện trò, lời khuyên thì trả lời
 luôn, không tìm.
 - Trước khi tìm, nói một câu dẫn thật ngắn như "Để Gừng xem nhé." rồi mới tìm.
+- Mọi chữ bạn viết đều được đọc to, kể cả giữa các lần tìm hay đọc trang. Cần tìm hay đọc
+  thêm thì chỉ được nói một câu ngắn tự nhiên như "Gừng đọc thử trang của rạp nhé.", không
+  nói chi tiết kỹ thuật (đường link, mã hoá, lỗi, định dạng kết quả).
+- Đoạn trích trong kết quả tìm đủ để trả lời thì trả lời luôn. Chỉ khi đoạn trích không
+  đủ thông tin (thiếu giờ, số liệu, danh sách, hay lẫn lộn, mâu thuẫn) mới dùng web_fetch
+  đọc trang phù hợp nhất trong các kết quả vừa tìm được.
 - Kể lại kết quả ngắn gọn theo văn nói; không đọc địa chỉ trang web, chỉ nêu tên nguồn
   khi cần thiết.
 
@@ -132,14 +138,28 @@ WEB_SEARCH = {
     # Không ghi country: API báo "Country code VN is not supported".
     "user_location": {"type": "approximate", "timezone": "Asia/Ho_Chi_Minh"},
 }
+# Đoạn trích của web_search chưa đủ thì Claude mở trang đầy đủ. Giới hạn số trang và độ dài để
+# giữ độ trễ và token (một trang có thể vài chục nghìn token).
+# Chỉ mở URL có trong kết quả web_search (không mở link người dùng gửi: app nói chuyện, không ai đọc URL).
+WEB_FETCH = {
+    "type": "web_fetch_20250910",
+    "name": "web_fetch",
+    "max_uses": 1,
+    "max_content_tokens": 10000,
+    "url_sources": {
+        "user_input": {"type": "none"},
+        "client_tool_results": {"type": "none"},
+        "server_tool_results": {"type": "only", "tools": [{"type": "tool_reference", "name": "web_search"}]},
+    },
+}
 MAX_PAUSES = 3
 
 
 async def stream_reply(context: PromptContext, messages: list[dict]) -> AsyncIterator[str]:
     model = context.model
     msgs = build_messages(context, messages)
-    # Câu dẫn ("Để Gừng xem nhé.") và câu trả lời sau khi tìm là hai khối chữ tách nhau bởi
-    # khối tool: chèn dấu cách, không thì dính liền. Khối chữ kèm trích dẫn liền nhau thì nối thẳng.
+    # Câu dẫn ("Để Gừng xem nhé.") và câu trả lời là hai khối chữ tách nhau bởi khối tool:
+    # chèn dấu cách, không thì dính liền. Khối chữ kèm trích dẫn liền nhau thì nối thẳng.
     said, after_tool = False, False
     for _ in range(MAX_PAUSES + 1):
         async with claude.messages.stream(
@@ -147,7 +167,7 @@ async def stream_reply(context: PromptContext, messages: list[dict]) -> AsyncIte
             max_tokens=1024,
             system=system_prompt(context),
             messages=msgs,
-            tools=[WEB_SEARCH],
+            tools=[WEB_SEARCH, WEB_FETCH],
             # Tắt thinking + effort thấp tuỳ model (chat_models._params). Để mặc định
             # (adaptive + effort high) thì Sonnet chờ ~4s mới ra chữ đầu.
             **model.params,
@@ -163,10 +183,11 @@ async def stream_reply(context: PromptContext, messages: list[dict]) -> AsyncIte
                     yield ev.delta.text
             final = await stream.get_final_message()
         u = final.usage
-        n = u.server_tool_use.web_search_requests if u.server_tool_use else 0
+        st = u.server_tool_use
         log.info(
-            "Claude usage (%s): input %s, cache read %s, cache write %s, output %s, web search %s",
-            model.id, u.input_tokens, u.cache_read_input_tokens, u.cache_creation_input_tokens, u.output_tokens, n,
+            "Claude usage (%s): input %s, cache read %s, cache write %s, output %s, web search %s, fetch %s",
+            model.id, u.input_tokens, u.cache_read_input_tokens, u.cache_creation_input_tokens, u.output_tokens,
+            st.web_search_requests if st else 0, st.web_fetch_requests if st else 0,
         )
         # Vòng tìm kiếm phía server chạy quá lâu thì API dừng giữa chừng: gửi lại để làm tiếp.
         if final.stop_reason != "pause_turn":

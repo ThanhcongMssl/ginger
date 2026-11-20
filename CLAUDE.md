@@ -35,6 +35,11 @@ App mobile trợ lý ảo dựa trên AI:
   sau câu dẫn, input ~18–20 nghìn token/lượt tìm (+10 USD/1.000 lượt); câu không cần tìm thì không tìm.
   Bản `web_search_20260209` (lọc kết quả bằng code) bị loại: chậm gấp 2–3 lần, gần gấp đôi token, và đọc
   cả lời tự nói nội bộ ("Kết quả trả về không đúng dạng dự kiến…"). `user_location` không nhận country VN.
+- Đọc trang (`WEB_FETCH`, `web_fetch_20250910`): chỉ khi đoạn trích của web_search không đủ để trả lời;
+  `url_sources` chỉ cho mở URL trong kết quả web_search (không mở link người dùng gửi), tối đa 1 trang,
+  cắt ở 10.000 token. Đo (Sonnet): giá vàng, thời tiết, tỉ giá, xăng, bóng đá không đọc trang; lịch chiếu
+  CGV có đọc (input ~35–44 nghìn token, xong 8–26s tuỳ trang mở nhanh hay chậm). Gừng được nói một câu
+  ngắn giữa hai lần tìm/đọc (lấp khoảng lặng) nhưng prompt cấm chi tiết kỹ thuật.
 - Xưng hô (`PERSONA` trong backend/app/llm.py): trợ lý tự xưng "Gừng", mặc định gọi người
   dùng là "anh". Không có màn cài đặt: người dùng nói "gọi tôi là chị/bạn…" thì Gừng đổi ngay,
   và ký ức lưu thành câu cố định "Người dùng muốn được gọi là …"
