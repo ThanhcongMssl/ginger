@@ -5,6 +5,11 @@
 #   bash scripts/build-ios.sh            # pull code, build .ipa, kiểm tra, hỏi có submit không
 #   bash scripts/build-ios.sh --submit   # build xong submit luôn
 #   bash scripts/build-ios.sh --no-pull  # build đúng code đang có, không git pull
+#   bash scripts/build-ios.sh --record   # chỉ lưu runtime của .ipa mới nhất lên EAS (xem dưới)
+#
+# Gửi TestFlight xong, script lưu runtimeVersion (fingerprint) của bản đó vào biến EAS
+# TESTFLIGHT_RUNTIME (môi trường `production`, không build nào dùng): scripts/ota.sh trên máy
+# không có .ipa (PC) đọc biến này để biết đẩy OTA tới bản TestFlight được không.
 #
 # Cần cài một lần trên Mac: Xcode (mở một lần để cài thêm thành phần, nhận license),
 # `brew install node cocoapods fastlane`, rồi `npx eas-cli login` (hoặc export EXPO_TOKEN).
@@ -18,17 +23,30 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-submit=ask pull=1
+submit=ask pull=1 record_only=0
 for a in "$@"; do
   case "$a" in
     --submit) submit=yes ;;
     --no-submit) submit=no ;;
     --no-pull) pull=0 ;;
+    --record) record_only=1 ;;
     *) echo "Không hiểu tham số: $a" >&2; exit 2 ;;
   esac
 done
 
 die() { echo "✗ $*" >&2; exit 1; }
+record_runtime() {
+  local rt
+  rt=$(unzip -p "$1" 'Payload/*.app/EXUpdates.bundle/fingerprint') || die "Không đọc được runtime trong $1."
+  npx eas-cli env:set production --name TESTFLIGHT_RUNTIME --value "$rt" --visibility plaintext \
+    --non-interactive >/dev/null
+  echo "✓ Đã lưu runtime TestFlight $rt lên EAS ($(basename "$1"))."
+}
+if [ "$record_only" = 1 ]; then
+  latest=$(ls -t "$HOME"/ginger-ipa/*.ipa 2>/dev/null | head -n1 || true)
+  [ -n "$latest" ] || die "Không có .ipa nào trong ~/ginger-ipa."
+  record_runtime "$latest"; exit 0
+fi
 # pod/fastlane bản Homebrew tự mang gem riêng; GEM_PATH của rvm lọt vào thì pod lỗi "Could not find 'base64'".
 unset GEM_PATH GEM_HOME
 [ "$(uname)" = Darwin ] || die "Script này chạy trên macOS."
@@ -69,6 +87,7 @@ if [ "$submit" = ask ]; then
 fi
 if [ "$submit" = yes ]; then
   npx eas-cli submit --platform ios --profile production --path "$ipa"
+  record_runtime "$ipa"
   echo "✓ Đã gửi. Apple xử lý vài phút tới vài chục phút rồi bản build hiện trong TestFlight."
 else
   echo "Để gửi sau: npx eas-cli submit --platform ios --profile production --path $ipa"

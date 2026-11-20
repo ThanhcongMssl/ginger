@@ -26,6 +26,11 @@ build_rt=$(npx eas-cli build:list --profile preview --platform ios --status fini
   --json --non-interactive 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["runtime"]["version"])')
 ipa=$(ls -t "$HOME"/ginger-ipa/*.ipa 2>/dev/null | head -n1 || true)
 ipa_rt=$([ -n "$ipa" ] && unzip -p "$ipa" 'Payload/*.app/EXUpdates.bundle/fingerprint' 2>/dev/null || true)
+# Máy không có .ipa (vd. PC): build-ios.sh lưu runtime của bản đã gửi TestFlight lên EAS.
+if [ -z "$ipa_rt" ]; then
+  ipa="(lưu trên EAS)"
+  ipa_rt=$(npx eas-cli env:exec production 'printf "%s" "${TESTFLIGHT_RUNTIME:-}"' --non-interactive 2>/dev/null | tail -n1)
+fi
 if [ "$local_rt" = "$build_rt" ]; then
   echo "✓ Khớp build preview mới nhất ($build_rt)."
 elif [ "$local_rt" = "$ipa_rt" ]; then

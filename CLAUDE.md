@@ -159,7 +159,8 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
 - Bản App Store/TestFlight: build trên MacBook của anh bằng `bash scripts/build-ios.sh` (trong `app/`,
   `eas build --local`, profile `production`, không tốn lượt EAS; gói Free chỉ có 15 build iOS/tháng).
   Script pull code, build .ipa vào `~/ginger-ipa`, soi bundle (có API URL, không có token) rồi
-  `eas submit`. Không build bằng Xcode tay (Metro đọc app/.env → nhúng token). Profile `production` dùng
+  `eas submit`, rồi lưu runtime của bản đó vào biến EAS `TESTFLIGHT_RUNTIME` (môi trường `production`) để
+  `ota.sh` trên PC (không có .ipa) biết đẩy OTA tới bản TestFlight được không (`--record`: chỉ lưu). Không build bằng Xcode tay (Metro đọc app/.env → nhúng token). Profile `production` dùng
   channel `preview` nên OTA tới cả bản TestFlight; eas.json không tính vào fingerprint.
   Đưa ra ngoài TestFlight nội bộ thì người duyệt Apple vướng `TokenGate`.
 - Tự rảnh tay (native): mở app hoặc quay lại app (AppState 'active') là tự bắt đầu trò chuyện,
