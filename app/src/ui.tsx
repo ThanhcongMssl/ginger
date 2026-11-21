@@ -80,7 +80,7 @@ export function MicButton(props: {
 
 /**
  * Nút tắt/bật micro cạnh nút micro chính, chỉ có icon. Luôn là icon micro gạch chéo (khác hẳn nút micro
- * giữa): đang bật thì viền và icon cùng màu nâu đậm; đang tắt thì nền đỏ cam, icon trắng.
+ * giữa): đang bật thì chỉ có icon đỏ cam, không vòng tròn; đang tắt thì nền tròn đỏ cam, icon trắng.
  */
 export function MuteButton({ muted, onPress }: { muted: boolean; onPress: () => void }) {
   return (
@@ -92,15 +92,15 @@ export function MuteButton({ muted, onPress }: { muted: boolean; onPress: () => 
       accessibilityState={{ checked: muted }}
       accessibilityLabel={muted ? 'Bật lại micro' : 'Tắt micro'}
     >
-      {/* Bình thường: viền cùng màu icon (không nền đặc như nút dừng). Đang tắt: nền đỏ cam, icon trắng. */}
-      <MicOffIcon color={muted ? '#FFF' : C.ink} size={26} />
+      {/* Bình thường: icon trơn màu đỏ cam. Đang tắt: nền tròn đỏ cam, icon trắng. */}
+      <MicOffIcon color={muted ? '#FFF' : C.error} size={26} />
     </Pressable>
   );
 }
 
 /**
  * Nút dừng, đối xứng với nút tắt micro. Chỉ bấm được lúc Gừng đang nói / đang nghĩ: dừng câu trả lời,
- * cuộc trò chuyện vẫn tiếp tục.
+ * cuộc trò chuyện vẫn tiếp tục. Chỉ có icon trơn, không vòng tròn; lúc không bấm được thì mờ.
  */
 export function StopButton({ enabled, onPress }: { enabled: boolean; onPress: () => void }) {
   return (
@@ -108,13 +108,13 @@ export function StopButton({ enabled, onPress }: { enabled: boolean; onPress: ()
       onPress={onPress}
       disabled={!enabled}
       hitSlop={14}
-      style={[styles.muteBtn, enabled ? styles.stopBtnOn : styles.sideBtnDisabled]}
+      style={[styles.muteBtn, !enabled && styles.sideBtnDisabled]}
       accessibilityRole="button"
       accessibilityState={{ disabled: !enabled }}
       accessibilityLabel="Dừng câu trả lời"
     >
       <Svg width={24} height={24} viewBox="0 0 24 24">
-        <Rect x={5} y={5} width={14} height={14} rx={3} fill={enabled ? '#FFF' : C.ink} />
+        <Rect x={5} y={5} width={14} height={14} rx={3} fill={C.ink} />
       </Svg>
     </Pressable>
   );
@@ -436,13 +436,10 @@ export const styles = StyleSheet.create({
     borderRadius: SIDE_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: C.bg,
-    borderWidth: 2,
-    borderColor: C.line,
   },
-  muteBtnOff: { borderColor: C.ink },
-  muteBtnOn: { backgroundColor: C.error, borderColor: C.error },
-  stopBtnOn: { backgroundColor: C.ink, borderColor: C.ink },
+  // Bình thường không vòng tròn (vùng bấm vẫn đủ SIDE_SIZE); chỉ lúc tắt micro mới có nền tròn đỏ cam.
+  muteBtnOff: {},
+  muteBtnOn: { backgroundColor: C.error },
   sideBtnDisabled: { opacity: 0.35 },
   micWrap: { alignItems: 'center', justifyContent: 'center' },
   micHalo: { position: 'absolute', width: MIC_SIZE, height: MIC_SIZE, borderRadius: MIC_SIZE / 2, backgroundColor: C.listening },

@@ -230,9 +230,9 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
   `onState`. Vẽ Layout riêng trong phòng thì lúc vào phòng React dựng lại: icon header và
   hiệu ứng kết nối nháy.
 - Nút tắt micro (`MuteButton` trong ui.tsx, bên trái nút micro, chỉ hiện khi đã vào phòng; hai nút bên chỉ có icon, cách nút micro `SIDE_GAP` để nằm ngoài quầng sáng lúc phồng to nhất): `setMicrophoneEnabled(false)`
-  (tắt track, không rời phòng), vẫn nghe Gừng nói; nút luôn là icon micro gạch chéo (khác nút micro giữa), bình thường viền tròn cùng màu icon (nâu đậm, không dùng nền đặc như nút dừng), đang tắt thì nền đỏ cam, icon trắng; không có dòng chữ báo tắt micro. Bắt đầu lại
+  (tắt track, không rời phòng), vẫn nghe Gừng nói; nút luôn là icon micro gạch chéo (khác nút micro giữa), bình thường chỉ có icon đỏ cam (không vòng tròn, vùng bấm giữ nguyên), đang tắt thì nền tròn đỏ cam, icon trắng; không có dòng chữ báo tắt micro. Bắt đầu lại
   thì micro bật. Agent vẫn tính im lặng như thường: tắt quá 20s thì phiên tự kết thúc. Chưa thử trên iPhone.
-- Nút dừng (`StopButton`, bên phải nút micro, đối xứng nút tắt micro; chỉ bấm được lúc Gừng đang nói / đang nghĩ):
+- Nút dừng (`StopButton`, bên phải nút micro, đối xứng nút tắt micro; chỉ bấm được lúc Gừng đang nói / đang nghĩ; icon vuông nâu trơn, không vòng tròn, lúc không bấm được thì mờ):
   app tắt tiếng track của Gừng ngay (`useDucking(..., silenced)`) và gọi RPC `stop_speaking` tới agent →
   `session.interrupt(force=True)` (cả câu đọc kết quả việc nền), phần đã đọc vẫn lưu, phiên không kết thúc; agent quay
   về nghe thì app bật lại tiếng. Chưa thử với LiveKit thật.
