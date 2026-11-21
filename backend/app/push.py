@@ -1,9 +1,9 @@
-"""Thông báo đẩy khi việc chạy nền (trình duyệt, sửa code) xong mà anh không mở app.
+"""Thông báo đẩy khi việc chạy nền (trình duyệt, sửa code) có kết quả.
 
-Agent giọng nói đang mở phiên thì đọc kết quả trong ~2s (đánh dấu announced). Quá GRACE_SEC mà chưa đọc
-(anh tắt app, hoặc đang gõ chữ) thì gửi thông báo qua Expo Push tới mọi máy của tài khoản. Anh chạm vào
-thông báo → app mở, tự bắt đầu trò chuyện → agent đọc kết quả (vẫn chưa announced) và anh trả lời tiếp được.
-Chạy trong backend (lifespan của main.py).
+Mọi kết quả đều gửi qua Expo Push tới mọi máy của tài khoản, kể cả khi agent đã đọc lên: server không biết
+chắc anh còn trong app (iOS treo app ngay khi ra nền, LiveKit còn thấy micro thêm tới ~20s; log 21/11 đọc
+"đã push" vào phòng anh đã rời). App đang trò chuyện thì tự ẩn thông báo (src/push.ts), ra nền thì iOS hiện.
+Chưa được đọc thì chạm vào thông báo → app mở, tự trò chuyện → agent đọc kết quả. Chạy trong lifespan backend.
 """
 
 import asyncio
@@ -17,7 +17,10 @@ from .db import pool
 log = logging.getLogger("tro-ly.push")
 
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
-GRACE_SEC = 8
+EXPO_RECEIPTS_URL = "https://exp.host/--/api/v2/push/getReceipts"
+RECEIPT_DELAY_SEC = 15  # Expo cần vài giây mới có biên nhận từ APNs
+GRACE_SEC = 1
+MAX_AGE = "10 minutes"  # backend khởi động lại thì không gửi bù kết quả cũ hơn
 POLL_SEC = 3
 TABLES = ("browser_tasks", "dev_tasks")
 MAX_BODY = 300
@@ -53,7 +56,36 @@ async def send(user_id: UUID, body: str) -> int:
     errors = [k for k in tickets if k.get("status") != "ok"]
     if errors:
         log.warning("Expo push lỗi: %s", errors)
+    ids = [k["id"] for k in tickets if k.get("id")]
+    if ids:
+        _receipt_tasks.add(t := asyncio.create_task(_check_receipts(ids)))
+        t.add_done_callback(_receipt_tasks.discard)
     return len(tickets) - len(errors)
+
+
+_receipt_tasks: set[asyncio.Task] = set()
+
+
+async def _check_receipts(ids: list[str]) -> None:
+    """Ticket ok chỉ là Expo đã nhận; biên nhận mới cho biết APNs có giao không (key APNs sai, máy gỡ app…)."""
+    receipts: dict = {}
+    try:
+        for delay in (RECEIPT_DELAY_SEC, 45, 120):  # Expo có biên nhận sau vài giây tới vài phút
+            await asyncio.sleep(delay)
+            async with httpx.AsyncClient(timeout=15) as c:
+                r = await c.post(EXPO_RECEIPTS_URL, json={"ids": [i for i in ids if i not in receipts]})
+            receipts.update(r.json().get("data", {}))
+            if len(receipts) == len(ids):
+                break
+    except Exception:
+        log.exception("Không lấy được biên nhận Expo push")
+    bad = {i: v for i, v in receipts.items() if v.get("status") != "ok"}
+    if bad:
+        log.warning("APNs không nhận thông báo: %s", bad)
+    if len(receipts) < len(ids):
+        log.warning("Expo chưa có biên nhận cho %d/%d thông báo", len(ids) - len(receipts), len(ids))
+    elif not bad:
+        log.info("APNs đã nhận %d thông báo", len(ids))
 
 
 async def loop() -> None:
@@ -64,10 +96,10 @@ async def loop() -> None:
                     # Đánh dấu trước khi gửi: lỗi mạng thì bỏ lượt này, không gửi lặp.
                     rows = await (await conn.execute(
                         f"UPDATE {table} SET pushed_at = now() WHERE id IN ("
-                        f"SELECT id FROM {table} WHERE NOT announced AND result IS NOT NULL "
+                        f"SELECT id FROM {table} WHERE result IS NOT NULL "
                         "AND status IN ('done', 'waiting', 'failed') "
                         f"AND finished_at < now() - interval '{GRACE_SEC} seconds' "
-                        "AND finished_at > now() - interval '2 hours' "
+                        f"AND finished_at > now() - interval '{MAX_AGE}' "
                         "AND (pushed_at IS NULL OR pushed_at < finished_at)) "
                         "RETURNING id, user_id, result"
                     )).fetchall()

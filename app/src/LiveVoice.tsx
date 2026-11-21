@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { getLiveKitToken } from './api';
 import { MSG_NETWORK, friendlyError } from './errors';
+import { setVoiceActive } from './push';
 import { SettingsButton } from './Settings';
 import {
   PRECONNECT_BUFFER,
@@ -96,6 +97,9 @@ export default function LiveVoice({ onTextMode }: { onTextMode: () => void }) {
     },
     [end],
   );
+
+  // Đang trong phòng thì Gừng tự đọc kết quả việc nền, thông báo đẩy không hiện (src/push.ts).
+  useEffect(() => setVoiceActive(conn !== null), [conn]);
 
   // Đang trò chuyện thì giữ màn hình sáng.
   const active = starting || conn !== null;

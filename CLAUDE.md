@@ -75,11 +75,17 @@ App mobile trợ lý ảo dựa trên AI:
   khởi động thì sau ~57s tự quay về bản cũ (dịch vụ phải chạy liền 12s cùng PID mới tính là lên).
 - Việc chạy nền và cuộc gọi: Gừng đang làm việc được giao thì im lặng cũng chưa kết thúc phiên (`_end_when_idle` trong
   agent.py: trình duyệt tối đa 7 phút, sửa code 25 phút), đọc xong kết quả mới tính 20s im lặng như thường.
-  Thông báo đẩy (`backend/app/push.py`, chạy trong lifespan backend): kết quả chưa được agent đọc sau 8s (anh tắt
-  app hoặc đang gõ chữ) thì gửi qua Expo Push tới mọi máy của tài khoản (bảng `push_tokens`, `pushed_at` trên hai bảng
-  việc); chạm vào thông báo → app mở, tự trò chuyện, Gừng đọc kết quả (vẫn chưa announced). App: `src/push.ts`
+  Thông báo đẩy (`backend/app/push.py`, chạy trong lifespan backend): mọi kết quả đều gửi qua Expo Push tới mọi máy
+  của tài khoản sau ~1s, kể cả khi agent đã đọc (bảng `push_tokens`, `pushed_at` trên hai bảng việc); app đang trong
+  phòng trò chuyện thì tự ẩn (`setVoiceActive` trong push.ts), app ra nền thì iOS hiện. Lý do: server không biết chắc
+  app đã ra nền: iOS treo app ngay, LiveKit còn thấy micro thêm tới ~20s (log thật: đọc "đã push" lúc anh đã tắt app,
+  không có thông báo). Chạm vào thông báo → app mở, tự trò chuyện, Gừng đọc kết quả nếu chưa đọc. App: `src/push.ts`
   (`expo-notifications`, nạp lười) xin quyền + gửi token lên `POST /push/token` mỗi lần mở; Expo Go và web bỏ qua.
   Cần build mới (native) và key APNs trên EAS (build-ios.sh chạy tương tác, EAS hỏi thì chọn tạo push key).
+  Agent chỉ đọc kết quả khi app còn trong phòng và đang gửi micro (`_user_here`); không thì để đó cho thông báo đẩy
+  (log thật: phòng cũ treo vài giây sau khi mở lại app, đọc "đã push" vào đó nên mất cả lời lẫn thông báo).
+  Đọc xong mà anh rời phòng trong 6s (`CONFIRM_HEARD_SEC`, hoặc phiên kết thúc trước) thì `unmark_announced`
+  để lần mở app sau Gừng đọc lại. push.py hỏi biên nhận Expo (15s, 45s, 120s) và ghi log ("APNs đã nhận" / "không nhận").
   Đã thử vòng gửi bằng token giả (Expo báo DeviceNotRegistered → xoá token); chưa thử trên iPhone.
 - Xưng hô (`PERSONA` trong backend/app/llm.py): trợ lý tự xưng "Gừng", mặc định gọi người
   dùng là "anh". Không có màn cài đặt: người dùng nói "gọi tôi là chị/bạn…" thì Gừng đổi ngay,

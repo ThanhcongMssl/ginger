@@ -60,6 +60,7 @@ ANNOUNCE_POLL_SEC = 2
 BROWSER_WAIT_MAX_SEC = 420
 # Sửa code lâu hơn (Claude Code tối đa 20 phút + áp dụng). Giữ phiên chỉ tốn phút STT lúc im (rẻ).
 DEV_WAIT_MAX_SEC = 1500
+CONFIRM_HEARD_SEC = 6  # đọc xong kết quả mà anh còn trong phòng chừng này mới tính là đã nghe
 
 # Lọc tiếng vọng: khử vọng trên điện thoại không triệt hết, STT vẫn nghe ra lời Ginger
 # (vd. Ginger nói "bé Dừa ngửi mùi quen" → STT nghe "Bé giờ ngửi mùi quê") rồi tự ngắt
@@ -393,6 +394,16 @@ async def entrypoint(ctx: JobContext) -> None:
     def _on_agent_state(ev: AgentStateChangedEvent) -> None:
         agent.on_agent_state(ev.new_state)
 
+    def _user_here() -> bool:
+        # App còn trong phòng và đang gửi micro (tắt tiếng bằng nút vẫn tính). iOS đưa app ra nền hay mở
+        # lại app thì phòng cũ còn treo vài giây mà không ai nghe: đọc kết quả vào đó là mất, và vì đã đánh
+        # dấu đọc rồi nên backend cũng không gửi thông báo đẩy (log 21/11: "đã push" đọc vào phòng trống).
+        return agent._mic_ready and any(
+            pub.source == rtc.TrackSource.SOURCE_MICROPHONE and pub.track is not None
+            for p in ctx.room.remote_participants.values()
+            for pub in p.track_publications.values()
+        )
+
     async def _end_when_idle() -> None:
         # Gừng đang làm việc anh giao (trình duyệt, sửa code) thì chờ đọc xong kết quả, rồi cho thêm một khoảng
         # im lặng để anh trả lời (vd. xác nhận đặt chỗ, đồng ý áp dụng) mới kết thúc phiên.
@@ -400,6 +411,8 @@ async def entrypoint(ctx: JobContext) -> None:
         waited = False
 
         async def busy() -> bool:
+            if not _user_here():  # anh đã rời app: kết quả đi bằng thông báo đẩy (push.py)
+                return False
             for mod, limit in ((browser, BROWSER_WAIT_MAX_SEC), (dev, DEV_WAIT_MAX_SEC)):
                 if time.monotonic() - t0 < limit and (
                     await mod.has_active(user_id) or await mod.pending_announcements(user_id)
@@ -427,17 +440,55 @@ async def entrypoint(ctx: JobContext) -> None:
         if ev.new_state == "away":
             _spawn(_end_when_idle())
 
+    # Kết quả đã đọc nhưng chưa chắc anh nghe hết. iOS treo app ngay khi ra nền (không có background audio),
+    # app chưa kịp rời phòng nên LiveKit vẫn thấy track micro thêm 5–20s: `_user_here` còn đúng lúc bắt đầu đọc
+    # (log 21/11 14:52: đọc lúc :16, micro mới mất lúc :21). Nên chỉ coi là đã nghe khi đọc xong mà anh vẫn còn
+    # trong phòng thêm CONFIRM_HEARD_SEC; không thì trả lại (unmark) để backend gửi thông báo đẩy.
+    unheard: dict = {}
+
+    async def _confirm_heard(task_id, handle) -> None:
+        try:
+            await handle.wait_for_playout()
+        except Exception:
+            pass
+        end = time.monotonic() + CONFIRM_HEARD_SEC
+        while time.monotonic() < end:
+            if not _user_here():
+                break
+            await asyncio.sleep(0.5)
+        else:
+            unheard.pop(task_id, None)
+            return
+        await _return_unheard(task_id)
+
+    async def _return_unheard(task_id) -> None:
+        item = unheard.pop(task_id, None)
+        if item:
+            mod, result = item
+            log.info("Anh rời phòng trước khi nghe xong kết quả, để lại cho thông báo đẩy")
+            await mod.unmark_announced(task_id, result)
+
+    async def _flush_unheard() -> None:
+        for task_id in list(unheard):
+            await _return_unheard(task_id)
+
+    ctx.add_shutdown_callback(_flush_unheard)
+
     async def _announce_task_results() -> None:
         # Kết quả đã nằm trong lịch sử trò chuyện (worker ghi), ở đây chỉ đọc lên.
         while True:
             await asyncio.sleep(ANNOUNCE_POLL_SEC)
+            if not _user_here():
+                continue
             try:
                 for mod in (browser, dev):  # trình duyệt, sửa code
                     for t in await mod.pending_announcements(user_id):
                         await mod.mark_announced(t["id"])
                         log.info("Đọc kết quả %s: %r", mod.__name__, t["result"])
                         agent.note_said(t["result"])
-                        session.say(t["result"], add_to_chat_ctx=False)
+                        handle = session.say(t["result"], add_to_chat_ctx=False)
+                        unheard[t["id"]] = (mod, t["result"])
+                        _spawn(_confirm_heard(t["id"], handle))
             except Exception:
                 log.exception("Lỗi khi đọc kết quả trình duyệt")
 

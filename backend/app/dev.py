@@ -261,6 +261,15 @@ async def mark_announced(task_id: UUID) -> None:
         await conn.execute("UPDATE dev_tasks SET announced = true WHERE id = %s", (task_id,))
 
 
+async def unmark_announced(task_id: UUID, result: str) -> None:
+    # Agent đọc mà anh không nghe hết (rời app giữa chừng): trả lại cho thông báo đẩy / phiên sau đọc lại.
+    # So result để không đụng tới kết quả mới hơn của cùng việc.
+    async with pool.connection() as conn:
+        await conn.execute(
+            "UPDATE dev_tasks SET announced = false WHERE id = %s AND result = %s", (task_id, result)
+        )
+
+
 # ---------- Chạy lệnh ----------
 
 async def _run(args: list[str], cwd: Path | None = None, env: dict | None = None,
