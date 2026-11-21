@@ -10,5 +10,28 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+  # Trình duyệt cho Gừng thao tác (app/browser.py nối vào qua MCP). Chạy trong container riêng:
+  # không thấy repo, .env hay file trên máy; profile chỉ nằm trong RAM (--isolated), mỗi việc một
+  # phiên trình duyệt mới. Không có xác thực nên chỉ mở cổng trên 127.0.0.1.
+  browser:
+    image: mcr.microsoft.com/playwright/mcp:v0.0.86
+    restart: unless-stopped
+    command:
+      - --headless
+      - --browser=chromium
+      - --no-sandbox
+      - --isolated
+      - --host=0.0.0.0
+      - --port=8931
+      - --allowed-hosts=*
+      # Bản mobile của trang nhẹ hơn → snapshot ít token hơn.
+      - --mobile
+      # Không gửi ảnh chụp màn hình cho Claude (tốn token, snapshot chữ là đủ).
+      - --image-responses=omit
+      # Trang web lạ không được bảo trình duyệt gọi vào máy anh (backend, Postgres, mạng nhà).
+      - --blocked-origins=http://host.docker.internal:*;https://host.docker.internal:*;http://gateway.docker.internal:*;http://localhost:*;http://127.0.0.1:*;http://192.168.*;http://10.*
+      - --timeout-navigation=30000
+    ports:
+      - "127.0.0.1:8931:8931"
 volumes:
   pgdata:

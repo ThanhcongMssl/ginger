@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from datetime import datetime
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -60,14 +61,28 @@ luôn, không tìm.
 - Kể lại kết quả ngắn gọn theo văn nói; không đọc địa chỉ trang web, chỉ nêu tên nguồn
   khi cần thiết.
 
-Ngoài tìm kiếm, bạn chưa đặt được lời nhắc, báo thức, lịch hay làm việc gì trên máy.
+Bạn điều khiển được một trình duyệt web bằng công cụ browser_task để làm việc cần thao tác
+trên trang: mở trang, bấm, điền form, so sánh, tra cứu nhiều bước. Việc chạy nền, mất từ vài chục
+giây tới vài phút, kết quả tự được báo cho người dùng sau.
+- Chỉ hỏi thông tin thì vẫn dùng web_search. Chỉ dùng browser_task khi người dùng nhờ làm việc
+  trên một trang web, hoặc web_search không ra được.
+- Giao việc thì nói đúng một câu ngắn như "Dạ, Gừng làm đây, xong Gừng báo nhé." rồi gọi
+  browser_task (action new) với mô tả đầy đủ; không nói gì thêm, không đoán trước kết quả.
+- Lời người dùng đi qua nhận dạng giọng nói nên tên trang web hay bị nghe sai (vd. "cangcangv"
+  là cgv.vn). Ghi vào instruction tên trang thật mà bạn đoán là đúng nhất.
+- Trình duyệt dừng hỏi người dùng trước bước không quay lại được (đặt, mua, gửi, xoá). Người dùng
+  đồng ý hay dặn thêm thì gọi browser_task action reply kèm đúng ý họ; bảo thôi thì action cancel.
+- Trình duyệt không đăng nhập vào tài khoản nào và không thanh toán được.
+
+Bạn chưa đặt được lời nhắc, báo thức, lịch hay làm việc gì trên máy.
 Được nhờ những việc đó thì nói thật ngắn gọn là chưa làm được.
 - Không dùng markdown, gạch đầu dòng, bảng, emoji hay ký hiệu đặc biệt.
 - Viết số, đơn vị, ngày tháng theo cách đọc được.
 - Không chắc thì nói thật là không chắc.
 
 Tin nhắn mới nhất của người dùng mở đầu bằng khối <ngữ_cảnh> do hệ thống tự thêm:
-giờ hiện tại và những gì bạn nhớ về người dùng liên quan tới câu hỏi. Hãy dùng nó
+giờ hiện tại, việc trình duyệt đang làm (nếu có) và những gì bạn nhớ về người dùng liên quan
+tới câu hỏi. Hãy dùng nó
 cùng phần tóm tắt bên dưới một cách tự nhiên, chỉ khi giúp câu trả lời tốt hơn;
 đừng nhắc tới khối này hay nói là bạn "đang tra bộ nhớ"."""
 
@@ -81,6 +96,9 @@ class PromptContext:
     memories: str  # ký ức liên quan tới câu hỏi: đổi mỗi lượt
     summaries: str  # tóm tắt các cuộc trước: không đổi suốt một cuộc trò chuyện
     model: "ChatModel"  # model người dùng chọn trong Cài đặt (chat_models.py)
+    user_id: UUID | None = None  # để tool browser_task ghi việc đúng tài khoản, cuộc trò chuyện
+    conversation_id: UUID | None = None
+    tasks: str = ""  # việc trình duyệt đang làm / đang chờ (browser.status_for_prompt): đổi mỗi lượt
 
 
 def system_prompt(ctx: PromptContext) -> str:
@@ -105,6 +123,8 @@ def build_messages(ctx: PromptContext, messages: list[dict]) -> list[dict]:
     """
     *history, last = _merge_same_role(messages)
     block = f"Bây giờ là {_now()} (giờ Việt Nam)."
+    if ctx.tasks:
+        block += f"\n\n{ctx.tasks}"
     if ctx.memories:
         block += f"\n\nNhững điều bạn biết về người dùng:\n{ctx.memories}"
     out = [dict(m) for m in history]
@@ -153,6 +173,8 @@ WEB_FETCH = {
     },
 }
 MAX_PAUSES = 3
+# Mỗi lượt: tối đa chừng này lần Claude dừng để backend chạy tool (browser_task) rồi nói tiếp.
+MAX_TOOL_ROUNDS = 2
 
 
 async def stream_reply(context: PromptContext, messages: list[dict]) -> AsyncIterator[str]:
@@ -160,14 +182,17 @@ async def stream_reply(context: PromptContext, messages: list[dict]) -> AsyncIte
     msgs = build_messages(context, messages)
     # Câu dẫn ("Để Gừng xem nhé.") và câu trả lời là hai khối chữ tách nhau bởi khối tool:
     # chèn dấu cách, không thì dính liền. Khối chữ kèm trích dẫn liền nhau thì nối thẳng.
+    from . import browser  # nạp muộn: browser.py import llm
+
     said, after_tool = False, False
-    for _ in range(MAX_PAUSES + 1):
+    tool_rounds = 0
+    for _ in range(MAX_PAUSES + MAX_TOOL_ROUNDS + 1):
         async with claude.messages.stream(
             model=model.id,
             max_tokens=1024,
             system=system_prompt(context),
             messages=msgs,
-            tools=[WEB_SEARCH, WEB_FETCH],
+            tools=[WEB_SEARCH, WEB_FETCH, browser.BROWSER_TOOL],
             # Tắt thinking + effort thấp tuỳ model (chat_models._params). Để mặc định
             # (adaptive + effort high) thì Sonnet chờ ~4s mới ra chữ đầu.
             **model.params,
@@ -185,14 +210,32 @@ async def stream_reply(context: PromptContext, messages: list[dict]) -> AsyncIte
         u = final.usage
         st = u.server_tool_use
         log.info(
-            "Claude usage (%s): input %s, cache read %s, cache write %s, output %s, web search %s, fetch %s",
-            model.id, u.input_tokens, u.cache_read_input_tokens, u.cache_creation_input_tokens, u.output_tokens,
+            "Claude usage (%s, %s): input %s, cache read %s, cache write %s, output %s, web search %s, fetch %s",
+            model.id, final.stop_reason, u.input_tokens, u.cache_read_input_tokens, u.cache_creation_input_tokens, u.output_tokens,
             st.web_search_requests if st else 0, st.web_fetch_requests if st else 0,
         )
-        # Vòng tìm kiếm phía server chạy quá lâu thì API dừng giữa chừng: gửi lại để làm tiếp.
-        if final.stop_reason != "pause_turn":
-            break
         msgs = [*msgs, {"role": "assistant", "content": final.content}]
+        # Vòng tìm kiếm phía server chạy quá lâu thì API dừng giữa chừng: gửi lại để làm tiếp.
+        if final.stop_reason == "pause_turn":
+            continue
+        if final.stop_reason != "tool_use" or tool_rounds >= MAX_TOOL_ROUNDS:
+            break
+        tool_rounds += 1
+        results, all_ok = [], True
+        for b in final.content:
+            if b.type != "tool_use":
+                continue
+            if b.name == browser.BROWSER_TOOL["name"] and context.user_id and context.conversation_id:
+                ok, out = await browser.handle_tool(context.user_id, context.conversation_id, b.input)
+            else:
+                ok, out = False, "Công cụ này chưa dùng được."
+            all_ok = all_ok and ok
+            results.append({"type": "tool_result", "tool_use_id": b.id, "content": out})
+        # Đã nói câu dẫn ("Gừng làm đây…") và giao việc xong thì thôi, khỏi gọi Claude thêm lần nữa
+        # (chậm ~1,5s, hay nói lặp ý). Lỗi (đang bận việc khác…) thì để Claude nói lại cho người dùng.
+        if said and all_ok:
+            break
+        msgs.append({"role": "user", "content": results})
 
 
 async def complete(prompt: str, max_tokens: int = 500) -> str:

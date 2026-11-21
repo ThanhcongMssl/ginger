@@ -62,3 +62,23 @@ ALTER TABLE memories ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS voice_isolation BOOLEAN NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS conversations_user_idx ON conversations (user_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS memories_user_idx ON memories (user_id, id);
+
+-- Việc Gừng làm trên trình duyệt (app/browser.py). Gừng giao việc (status 'queued'), worker
+-- ginger-browser nhận và chạy; xong thì ghi kết quả vào cuộc trò chuyện, agent giọng nói đọc lên
+-- (announced). 'waiting' = trình duyệt dừng chờ người dùng xác nhận bước không quay lại được.
+CREATE TABLE IF NOT EXISTS browser_tasks (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id          UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    conversation_id  UUID REFERENCES conversations(id) ON DELETE SET NULL,
+    instruction      TEXT NOT NULL,
+    status           TEXT NOT NULL DEFAULT 'queued'
+                     CHECK (status IN ('queued', 'running', 'waiting', 'done', 'failed', 'cancelled')),
+    -- Lời người dùng trả lời khi việc đang chờ xác nhận, worker đưa tiếp cho trình duyệt.
+    pending_input    TEXT,
+    progress         TEXT,
+    result           TEXT,
+    announced        BOOLEAN NOT NULL DEFAULT false,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at      TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS browser_tasks_user_idx ON browser_tasks (user_id, created_at DESC);

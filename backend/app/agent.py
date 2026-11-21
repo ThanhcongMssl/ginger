@@ -41,7 +41,7 @@ from livekit.agents import (
 from livekit import rtc
 from livekit.plugins import krisp, silero, soniox
 
-from . import accounts, chat_models, memory
+from . import accounts, browser, chat_models, memory
 from .config import settings
 from .db import init_db
 from .llm import FALLBACK_REPLY, stream_reply
@@ -54,6 +54,10 @@ AGENT_NAME = "ginger"
 AWAY_TIMEOUT_SEC = 20
 # Báo sẵn sàng dù chưa thấy âm thanh từ micro sau chừng này giây kể từ khi phiên bắt đầu.
 MIC_READY_FALLBACK_SEC = 6
+# Hỏi DB xem trình duyệt đã làm xong việc nào để đọc kết quả (browser.py).
+ANNOUNCE_POLL_SEC = 2
+# Trình duyệt đang làm việc thì im lặng cũng chưa kết thúc phiên (để đọc kết quả), tối đa chừng này.
+BROWSER_WAIT_MAX_SEC = 420
 
 # Lọc tiếng vọng: khử vọng trên điện thoại không triệt hết, STT vẫn nghe ra lời Ginger
 # (vd. Ginger nói "bé Dừa ngửi mùi quen" → STT nghe "Bé giờ ngửi mùi quê") rồi tự ngắt
@@ -216,6 +220,10 @@ class Ginger(Agent):
         elif self._speaking:
             self._speaking = False
             self._spoke_until = time.monotonic()
+
+    def note_said(self, text: str) -> None:
+        """Ghi lại câu Ginger nói ngoài llm_node (kết quả trình duyệt) để lọc tiếng vọng."""
+        self._said = f"{self._said} {text}" if self._since_spoke() <= ECHO_KEEP_SEC else text
 
     def _since_spoke(self) -> float:
         return 0.0 if self._speaking else time.monotonic() - self._spoke_until
@@ -383,11 +391,45 @@ async def entrypoint(ctx: JobContext) -> None:
     def _on_agent_state(ev: AgentStateChangedEvent) -> None:
         agent.on_agent_state(ev.new_state)
 
+    async def _end_when_idle() -> None:
+        # Trình duyệt đang làm việc anh giao thì chờ đọc xong kết quả, rồi cho thêm một khoảng im
+        # lặng để anh trả lời (vd. xác nhận đặt chỗ) mới kết thúc phiên.
+        deadline = time.monotonic() + BROWSER_WAIT_MAX_SEC
+        waited = False
+        while time.monotonic() < deadline and (
+            await browser.has_active(user_id) or await browser.pending_announcements(user_id)
+        ):
+            if not waited:
+                log.info("Im lặng nhưng trình duyệt đang làm việc, giữ phiên")
+            waited = True
+            await asyncio.sleep(ANNOUNCE_POLL_SEC)
+        if waited:
+            await asyncio.sleep(ANNOUNCE_POLL_SEC + 1)
+            while session.agent_state == "speaking":
+                await asyncio.sleep(0.5)
+            await asyncio.sleep(AWAY_TIMEOUT_SEC)
+            if session.user_state != "away":
+                return
+        log.info("Người dùng im lặng %ss, kết thúc phiên", AWAY_TIMEOUT_SEC)
+        ctx.shutdown("user away")
+
     @session.on("user_state_changed")
     def _on_user_state(ev: UserStateChangedEvent) -> None:
         if ev.new_state == "away":
-            log.info("Người dùng im lặng %ss, kết thúc phiên", AWAY_TIMEOUT_SEC)
-            ctx.shutdown("user away")
+            _spawn(_end_when_idle())
+
+    async def _announce_browser_results() -> None:
+        # Kết quả đã nằm trong lịch sử trò chuyện (worker ghi), ở đây chỉ đọc lên.
+        while True:
+            await asyncio.sleep(ANNOUNCE_POLL_SEC)
+            try:
+                for t in await browser.pending_announcements(user_id):
+                    await browser.mark_announced(t["id"])
+                    log.info("Đọc kết quả trình duyệt: %r", t["result"])
+                    agent.note_said(t["result"])
+                    session.say(t["result"], add_to_chat_ctx=False)
+            except Exception:
+                log.exception("Lỗi khi đọc kết quả trình duyệt")
 
     def _mic_ready() -> None:
         # App giữ hiệu ứng "đang kết nối" tới khi thấy attribute này (LiveVoice.tsx).
@@ -406,6 +448,7 @@ async def entrypoint(ctx: JobContext) -> None:
     await session.start(agent=agent, room=ctx.room, room_options=room_opts)
     await ctx.room.local_participant.set_attributes({"conversation_id": str(conv_id)})
     _spawn(_mic_ready_fallback())
+    _spawn(_announce_browser_results())
 
 
 _background: set[asyncio.Task] = set()

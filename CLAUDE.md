@@ -40,6 +40,18 @@ App mobile trợ lý ảo dựa trên AI:
   cắt ở 10.000 token. Đo (Sonnet): giá vàng, thời tiết, tỉ giá, xăng, bóng đá không đọc trang; lịch chiếu
   CGV có đọc (input ~35–44 nghìn token, xong 8–26s tuỳ trang mở nhanh hay chậm). Gừng được nói một câu
   ngắn giữa hai lần tìm/đọc (lấp khoảng lặng) nhưng prompt cấm chi tiết kỹ thuật.
+- Thao tác trình duyệt (`backend/app/browser.py`): Gừng giao việc qua client tool `browser_task` (new / reply /
+  cancel), nói "Dạ, Gừng làm đây, xong Gừng báo nhé." rồi thôi (không gọi Claude lần hai). Việc nằm ở bảng
+  `browser_tasks`; worker `ginger-browser` (systemd, `python -m app.browser`) chạy vòng Claude Sonnet ↔ Playwright
+  MCP (container `browser` trong docker-compose, cổng 127.0.0.1:8931, profile trong RAM, chặn gọi vào máy/mạng
+  nhà). Chỉ cho các tool thao tác trang (không chạy JS, không tải file); không đăng nhập, không nhập thanh toán;
+  bước không quay lại được (đặt, gửi, xoá…) thì dừng `need_confirmation`, anh đồng ý thì Gừng gọi `reply`, phiên
+  trình duyệt giữ 10 phút. Kết quả ghi vào cuộc trò chuyện; agent giọng nói hỏi DB mỗi 2s và đọc bằng
+  `session.say` (không qua llm_node), im lặng lúc trình duyệt đang làm thì chưa kết thúc phiên (tối đa 7 phút).
+  Ảnh chụp trang bỏ link, cắt ở 20.000 ký tự, chỉ giữ nguyên 2 kết quả gần nhất (VnExpress ~127k ký tự gốc).
+  Tên trang hay bị STT nghe sai: Gừng và trình duyệt đều được dặn đoán trang thật. Đo (client giả bằng giọng):
+  tra phim đang chiếu 10–20s, ~25–45 nghìn token (phần lớn đọc từ cache); điền form + hỏi + gửi ~16s.
+  Chế độ gõ chữ chưa tự hiện kết quả (mở lại chat mới thấy). Sửa browser.py thì `systemctl --user restart ginger-browser`.
 - Xưng hô (`PERSONA` trong backend/app/llm.py): trợ lý tự xưng "Gừng", mặc định gọi người
   dùng là "anh". Không có màn cài đặt: người dùng nói "gọi tôi là chị/bạn…" thì Gừng đổi ngay,
   và ký ức lưu thành câu cố định "Người dùng muốn được gọi là …"
@@ -226,8 +238,8 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
   Windows `netsh portproxy` 8000 → IP WSL (đổi sau mỗi lần reboot)
 - Expo CLI đăng nhập bằng `EXPO_TOKEN` trong `~/.zshrc`; chạy `npx expo start --tunnel`
   (dev build: thêm `--dev-client`)
-- Tự khởi động sau khi bật máy (`scripts/autostart/install.sh`, chạy một lần): backend và agent là
-  dịch vụ systemd user `ginger-backend` / `ginger-agent` (linger, tự chạy lại khi chết); task Windows
+- Tự khởi động sau khi bật máy (`scripts/autostart/install.sh`, chạy một lần): backend, agent và worker trình
+  duyệt là dịch vụ systemd user `ginger-backend` / `ginger-agent` / `ginger-browser` (linger, tự chạy lại khi chết); task Windows
   "Ginger" lúc đăng nhập giữ WSL chạy và trỏ portproxy 8000 sang IP WSL mới; Postgres
   `restart: unless-stopped`, Docker Desktop tự mở (lên sau WSL nên `init_db` chờ Postgres tối đa 3 phút;
   uvicorn `--reload` giữ process cha khi app lỗi khởi động, systemd không biết mà chạy lại). Sửa agent.py thì `systemctl --user restart

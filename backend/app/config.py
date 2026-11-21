@@ -48,6 +48,9 @@ class Settings:
     livekit_api_key: str = os.getenv("LIVEKIT_API_KEY", "")
     livekit_api_secret: str = os.getenv("LIVEKIT_API_SECRET", "")
 
+    # Trình duyệt cho Gừng thao tác (container `browser` trong docker-compose.yml, app/browser.py).
+    browser_mcp_url: str = os.getenv("BROWSER_MCP_URL", "http://127.0.0.1:8931/mcp")
+
     # Thư mục bản web đã build của app.
     web_dir: str = os.getenv("WEB_DIR", str(Path(__file__).resolve().parents[2] / "app" / "dist"))
 
