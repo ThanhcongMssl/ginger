@@ -108,3 +108,13 @@ CREATE TABLE IF NOT EXISTS dev_tasks (
     finished_at      TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS dev_tasks_user_idx ON dev_tasks (user_id, created_at DESC);
+
+-- Thông báo đẩy (app/push.py): Expo push token của từng máy. Việc chạy nền xong mà agent không đọc được
+-- (anh không mở app) thì đẩy thông báo; pushed_at < finished_at nghĩa là kết quả mới chưa đẩy.
+CREATE TABLE IF NOT EXISTS push_tokens (
+    token       TEXT PRIMARY KEY,
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE browser_tasks ADD COLUMN IF NOT EXISTS pushed_at TIMESTAMPTZ;
+ALTER TABLE dev_tasks ADD COLUMN IF NOT EXISTS pushed_at TIMESTAMPTZ;

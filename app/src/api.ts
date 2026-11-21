@@ -133,6 +133,16 @@ export function voiceAudioSource(audioId: string) {
   return { uri: `${API_URL}/voice/audio/${audioId}`, headers: authHeaders() };
 }
 
+/** Expo push token của máy này, để backend gửi thông báo khi việc chạy nền xong (src/push.ts). */
+export async function registerPushToken(token: string): Promise<void> {
+  const res = await fetch(`${API_URL}/push/token`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  });
+  if (!res.ok) throw new Error(`Lỗi server ${res.status}`);
+}
+
 export async function getMemories(): Promise<Memory[]> {
   const res = await fetch(`${API_URL}/memories`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`Lỗi server ${res.status}`);

@@ -73,6 +73,14 @@ App mobile trợ lý ảo dựa trên AI:
   git bundle. Kết quả đọc lên trong 2 giờ. Đo: câu hỏi về code ~15s, sửa một dòng ~18s, áp dụng (gộp + khởi động
   lại + kiểm tra) ~21s. Đã thử: repo đang sửa dở trùng file thì từ chối gộp; cố ý làm worker trình duyệt chết lúc
   khởi động thì sau ~57s tự quay về bản cũ (dịch vụ phải chạy liền 12s cùng PID mới tính là lên).
+- Việc chạy nền và cuộc gọi: Gừng đang làm việc được giao thì im lặng cũng chưa kết thúc phiên (`_end_when_idle` trong
+  agent.py: trình duyệt tối đa 7 phút, sửa code 25 phút), đọc xong kết quả mới tính 20s im lặng như thường.
+  Thông báo đẩy (`backend/app/push.py`, chạy trong lifespan backend): kết quả chưa được agent đọc sau 8s (anh tắt
+  app hoặc đang gõ chữ) thì gửi qua Expo Push tới mọi máy của tài khoản (bảng `push_tokens`, `pushed_at` trên hai bảng
+  việc); chạm vào thông báo → app mở, tự trò chuyện, Gừng đọc kết quả (vẫn chưa announced). App: `src/push.ts`
+  (`expo-notifications`, nạp lười) xin quyền + gửi token lên `POST /push/token` mỗi lần mở; Expo Go và web bỏ qua.
+  Cần build mới (native) và key APNs trên EAS (build-ios.sh chạy tương tác, EAS hỏi thì chọn tạo push key).
+  Đã thử vòng gửi bằng token giả (Expo báo DeviceNotRegistered → xoá token); chưa thử trên iPhone.
 - Xưng hô (`PERSONA` trong backend/app/llm.py): trợ lý tự xưng "Gừng", mặc định gọi người
   dùng là "anh". Không có màn cài đặt: người dùng nói "gọi tôi là chị/bạn…" thì Gừng đổi ngay,
   và ký ức lưu thành câu cố định "Người dùng muốn được gọi là …"

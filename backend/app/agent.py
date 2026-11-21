@@ -56,8 +56,10 @@ AWAY_TIMEOUT_SEC = 20
 MIC_READY_FALLBACK_SEC = 6
 # Hỏi DB xem trình duyệt / phần sửa code đã làm xong việc nào để đọc kết quả (browser.py, dev.py).
 ANNOUNCE_POLL_SEC = 2
-# Trình duyệt đang làm việc thì im lặng cũng chưa kết thúc phiên (để đọc kết quả), tối đa chừng này.
+# Việc được giao đang chạy thì im lặng cũng chưa kết thúc phiên (để đọc kết quả), tối đa chừng này.
 BROWSER_WAIT_MAX_SEC = 420
+# Sửa code lâu hơn (Claude Code tối đa 20 phút + áp dụng). Giữ phiên chỉ tốn phút STT lúc im (rẻ).
+DEV_WAIT_MAX_SEC = 1500
 
 # Lọc tiếng vọng: khử vọng trên điện thoại không triệt hết, STT vẫn nghe ra lời Ginger
 # (vd. Ginger nói "bé Dừa ngửi mùi quen" → STT nghe "Bé giờ ngửi mùi quê") rồi tự ngắt
@@ -392,15 +394,22 @@ async def entrypoint(ctx: JobContext) -> None:
         agent.on_agent_state(ev.new_state)
 
     async def _end_when_idle() -> None:
-        # Trình duyệt đang làm việc anh giao thì chờ đọc xong kết quả, rồi cho thêm một khoảng im
-        # lặng để anh trả lời (vd. xác nhận đặt chỗ) mới kết thúc phiên.
-        deadline = time.monotonic() + BROWSER_WAIT_MAX_SEC
+        # Gừng đang làm việc anh giao (trình duyệt, sửa code) thì chờ đọc xong kết quả, rồi cho thêm một khoảng
+        # im lặng để anh trả lời (vd. xác nhận đặt chỗ, đồng ý áp dụng) mới kết thúc phiên.
+        t0 = time.monotonic()
         waited = False
-        while time.monotonic() < deadline and (
-            await browser.has_active(user_id) or await browser.pending_announcements(user_id)
-        ):
+
+        async def busy() -> bool:
+            for mod, limit in ((browser, BROWSER_WAIT_MAX_SEC), (dev, DEV_WAIT_MAX_SEC)):
+                if time.monotonic() - t0 < limit and (
+                    await mod.has_active(user_id) or await mod.pending_announcements(user_id)
+                ):
+                    return True
+            return False
+
+        while await busy():
             if not waited:
-                log.info("Im lặng nhưng trình duyệt đang làm việc, giữ phiên")
+                log.info("Im lặng nhưng Gừng đang làm việc được giao, giữ phiên")
             waited = True
             await asyncio.sleep(ANNOUNCE_POLL_SEC)
         if waited:

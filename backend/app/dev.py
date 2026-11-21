@@ -246,6 +246,16 @@ async def pending_announcements(user_id: UUID) -> list[dict]:
         )).fetchall()
 
 
+async def has_active(user_id: UUID) -> bool:
+    if not allowed(user_id):
+        return False
+    async with pool.connection() as conn:
+        row = await (await conn.execute(
+            "SELECT 1 FROM dev_tasks WHERE user_id = %s AND status IN ('queued', 'running', 'approved')", (user_id,),
+        )).fetchone()
+    return row is not None
+
+
 async def mark_announced(task_id: UUID) -> None:
     async with pool.connection() as conn:
         await conn.execute("UPDATE dev_tasks SET announced = true WHERE id = %s", (task_id,))

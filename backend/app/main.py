@@ -14,7 +14,7 @@ from livekit import api as lk_api
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
-from . import accounts, chat_models, memory, voice
+from . import accounts, chat_models, memory, push, voice
 from .config import settings
 from .db import close_db, init_db, pool
 from .llm import FALLBACK_REPLY, stream_reply
@@ -31,7 +31,9 @@ async def lifespan(fastapi_app: FastAPI):
     await init_db()
     # Lấy sẵn danh sách model để lượt chat đầu không phải chờ Models API.
     fastapi_app.state.warm_models = asyncio.create_task(chat_models.available())
+    pusher = asyncio.create_task(push.loop())
     yield
+    pusher.cancel()
     await close_db()
 
 
@@ -396,6 +398,17 @@ async def remove_memory(memory_id: int, user_id: UUID = User):
     if not await memory.delete_memory(user_id, memory_id):
         raise HTTPException(status_code=404, detail="Không tìm thấy")
     return {"deleted": memory_id}
+
+
+class PushTokenRequest(BaseModel):
+    token: str = Field(pattern=r"^Expo(nent)?PushToken\[[A-Za-z0-9_-]+\]$", max_length=200)
+
+
+@app.post("/push/token", dependencies=auth)
+async def register_push_token(req: PushTokenRequest, user_id: UUID = User):
+    """App gửi Expo push token mỗi lần mở (token đổi thì ghi đè)."""
+    await push.save_token(user_id, req.token)
+    return {"ok": True}
 
 
 class SettingsUpdate(BaseModel):
