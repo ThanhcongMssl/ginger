@@ -114,7 +114,7 @@ export function StopButton({ enabled, onPress }: { enabled: boolean; onPress: ()
       accessibilityLabel="Dừng câu trả lời"
     >
       <Svg width={24} height={24} viewBox="0 0 24 24">
-        <Rect x={5} y={5} width={14} height={14} rx={3} fill={enabled ? '#FFF' : C.ink} />
+        <Rect x={4} y={4} width={16} height={16} rx={3.5} fill={enabled ? '#FFF' : C.ink} />
       </Svg>
     </Pressable>
   );
