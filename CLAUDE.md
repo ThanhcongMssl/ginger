@@ -229,10 +229,10 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
   LiveVoice chỉ có một cây `Layout`; phòng LiveKit là con không vẽ gì, báo trạng thái lên qua
   `onState`. Vẽ Layout riêng trong phòng thì lúc vào phòng React dựng lại: icon header và
   hiệu ứng kết nối nháy.
-- Nút tắt micro (`MuteButton` trong ui.tsx, bên phải nút micro, chỉ hiện khi đã vào phòng): `setMicrophoneEnabled(false)`
-  (tắt track, không rời phòng), vẫn nghe Gừng nói; nền đỏ cam + icon gạch chéo + dòng "Micro đang tắt…". Bắt đầu lại
+- Nút tắt micro (`MuteButton` trong ui.tsx, bên trái nút micro, chỉ hiện khi đã vào phòng; hai nút bên chỉ có icon, cách nút micro `SIDE_GAP` để nằm ngoài quầng sáng lúc phồng to nhất): `setMicrophoneEnabled(false)`
+  (tắt track, không rời phòng), vẫn nghe Gừng nói; nền đỏ cam + icon gạch chéo + dòng "Micro đang tắt…" ở giữa màn hình. Bắt đầu lại
   thì micro bật. Agent vẫn tính im lặng như thường: tắt quá 20s thì phiên tự kết thúc. Chưa thử trên iPhone.
-- Nút dừng (`StopButton`, bên trái nút micro, đối xứng nút tắt micro; chỉ bấm được lúc Gừng đang nói / đang nghĩ):
+- Nút dừng (`StopButton`, bên phải nút micro, đối xứng nút tắt micro; chỉ bấm được lúc Gừng đang nói / đang nghĩ):
   app tắt tiếng track của Gừng ngay (`useDucking(..., silenced)`) và gọi RPC `stop_speaking` tới agent →
   `session.interrupt(force=True)` (cả câu đọc kết quả việc nền), phần đã đọc vẫn lưu, phiên không kết thúc; agent quay
   về nghe thì app bật lại tiếng. Chưa thử với LiveKit thật.

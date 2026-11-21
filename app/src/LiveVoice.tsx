@@ -424,15 +424,10 @@ function Layout(props: {
               {error}
             </Text>
           )}
-          {/* Nút micro luôn ở giữa; nút dừng bên trái, nút tắt micro bên phải (chỉ hiện khi đã vào phòng). */}
+          {/* Nút micro luôn ở giữa; nút tắt micro bên trái, nút dừng bên phải (chỉ hiện khi đã vào phòng), chỉ có icon. */}
           <View style={styles.footerRow}>
             <View style={styles.sideSlot}>
-              {props.canMute && (
-                <StopButton
-                  enabled={phase === 'speaking' || phase === 'thinking'}
-                  onPress={props.onStop}
-                />
-              )}
+              {props.canMute && <MuteButton muted={muted} onPress={props.onMute} />}
             </View>
             <MicButton
               listening={phase === 'listening' && !(props.canMute && muted)}
@@ -442,7 +437,12 @@ function Layout(props: {
               label={active ? 'Kết thúc trò chuyện' : 'Bắt đầu trò chuyện'}
             />
             <View style={styles.sideSlot}>
-              {props.canMute && <MuteButton muted={muted} onPress={props.onMute} />}
+              {props.canMute && (
+                <StopButton
+                  enabled={phase === 'speaking' || phase === 'thinking'}
+                  onPress={props.onStop}
+                />
+              )}
             </View>
           </View>
         </View>

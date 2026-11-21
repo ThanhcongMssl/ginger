@@ -21,6 +21,13 @@ export const ORB = 120;
 /** Chiều cao tối đa của mỗi thanh lúc kết nối. */
 const BAR_H = 44;
 
+/** Nút micro và quầng sáng quanh nó: nút hai bên phải nằm ngoài quầng lúc phồng to nhất. */
+const MIC_SIZE = 92;
+const HALO_MAX_SCALE = 2.3;
+const SIDE_SIZE = 64;
+/** Khoảng cách mép nút micro tới mép nút hai bên = bán kính quầng lớn nhất − bán kính nút micro + 8. */
+const SIDE_GAP = Math.ceil((MIC_SIZE * HALO_MAX_SCALE) / 2 - MIC_SIZE / 2) + 8;
+
 /**
  * Nút micro. Lúc đang nghe, quanh nút có quầng sáng phồng theo âm lượng giọng anh
  * (thay cho quả cầu riêng ở giữa màn hình).
@@ -58,7 +65,7 @@ export function MicButton(props: {
 
   return (
     <View style={styles.micWrap}>
-      {ring(1.1, 2.3, 0.28)}
+      {ring(1.1, HALO_MAX_SCALE, 0.28)}
       {ring(1.04, 1.6, 0.42)}
       <Pressable
         onPress={props.onPress}
@@ -85,8 +92,7 @@ export function MuteButton({ muted, onPress }: { muted: boolean; onPress: () => 
       accessibilityState={{ checked: muted }}
       accessibilityLabel={muted ? 'Bật lại micro' : 'Tắt micro'}
     >
-      {muted ? <MicOffIcon color="#FFF" size={26} /> : <MicIcon color={C.ink} size={26} />}
-      <Text style={[styles.muteText, muted && styles.muteTextOn]}>{muted ? 'Đang tắt' : 'Tắt mic'}</Text>
+      {muted ? <MicOffIcon color="#FFF" size={28} /> : <MicIcon color={C.ink} size={28} />}
     </Pressable>
   );
 }
@@ -106,10 +112,9 @@ export function StopButton({ enabled, onPress }: { enabled: boolean; onPress: ()
       accessibilityState={{ disabled: !enabled }}
       accessibilityLabel="Dừng câu trả lời"
     >
-      <Svg width={22} height={22} viewBox="0 0 24 24">
+      <Svg width={24} height={24} viewBox="0 0 24 24">
         <Rect x={5} y={5} width={14} height={14} rx={3} fill={enabled ? '#FFF' : C.ink} />
       </Svg>
-      <Text style={[styles.muteText, enabled && styles.muteTextOn]}>Dừng</Text>
     </Pressable>
   );
 }
@@ -421,12 +426,13 @@ export const styles = StyleSheet.create({
   footerError: { position: 'absolute', top: -14, left: 24, right: 24, fontSize: 15, lineHeight: 20, color: C.error, textAlign: 'center' },
   // Chừa chỗ cho quầng sáng quanh nút micro (phồng tới ~1,9 lần).
   footer: { alignItems: 'center', paddingBottom: 56, paddingTop: 48 },
-  footerRow: { flexDirection: 'row', alignItems: 'center', gap: 28 },
-  sideSlot: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center' },
+  // Nút hai bên nằm ngoài quầng sáng lúc phồng to nhất (không bị đè).
+  footerRow: { flexDirection: 'row', alignItems: 'center', gap: SIDE_GAP },
+  sideSlot: { width: SIDE_SIZE, height: SIDE_SIZE, alignItems: 'center', justifyContent: 'center' },
   muteBtn: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: SIDE_SIZE,
+    height: SIDE_SIZE,
+    borderRadius: SIDE_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: C.bg,
@@ -436,14 +442,12 @@ export const styles = StyleSheet.create({
   muteBtnOn: { backgroundColor: C.error, borderColor: C.error },
   stopBtnOn: { backgroundColor: C.ink, borderColor: C.ink },
   sideBtnDisabled: { opacity: 0.35 },
-  muteText: { fontSize: 10, color: C.muted, marginTop: 1 },
-  muteTextOn: { color: '#FFF', fontWeight: '600' },
   micWrap: { alignItems: 'center', justifyContent: 'center' },
-  micHalo: { position: 'absolute', width: 92, height: 92, borderRadius: 46, backgroundColor: C.listening },
+  micHalo: { position: 'absolute', width: MIC_SIZE, height: MIC_SIZE, borderRadius: MIC_SIZE / 2, backgroundColor: C.listening },
   talkBtn: {
-    width: 92,
-    height: 92,
-    borderRadius: 46,
+    width: MIC_SIZE,
+    height: MIC_SIZE,
+    borderRadius: MIC_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: C.primary,
