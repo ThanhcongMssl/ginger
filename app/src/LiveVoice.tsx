@@ -3,7 +3,8 @@
  * Không chạy trong Expo Go.
  * WebRTC khử tiếng vọng + khử ồn ngay trên máy nên micro mở suốt: anh nói chen vào
  * lúc Ginger đang nói là Ginger dừng lại nghe (agent ở backend/app/agent.py lo phần đó).
- * Chạm mic để bắt đầu trò chuyện, chạm lần nữa để kết thúc.
+ * Chạm mic để bắt đầu trò chuyện, chạm lần nữa để kết thúc. Nút tắt micro bên cạnh (chỉ hiện khi
+ * đang trò chuyện) tạm ngừng gửi tiếng lên agent mà không rời phòng; mỗi lần bắt đầu lại thì micro bật.
  * App native tự bắt đầu khi mở app hoặc quay lại app, và kết thúc khi chuyển sang app khác.
  */
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
@@ -34,6 +35,7 @@ import {
   KeyboardIcon,
   Logo,
   MicButton,
+  MuteButton,
   Phase,
   SpeakingWave,
   ThinkingOrb,
@@ -50,6 +52,8 @@ export default function LiveVoice({ onTextMode }: { onTextMode: () => void }) {
   const [conn, setConn] = useState<{ url: string; token: string; attempt: number } | null>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Anh tắt micro giữa cuộc trò chuyện: vẫn ở trong phòng, nghe Gừng nói, nhưng không gửi tiếng lên.
+  const [muted, setMuted] = useState(false);
   // ID cuộc trò chuyện (src/conversation.ts): agent báo qua attribute, lần sau gửi lại để nối tiếp.
 
   // Mỗi lần bắt đầu/kết thúc tăng số này: kết thúc lúc đang lấy token thì bỏ kết quả cũ.
@@ -58,6 +62,7 @@ export default function LiveVoice({ onTextMode }: { onTextMode: () => void }) {
   const start = useCallback(async () => {
     const id = ++attempt.current;
     setError(null);
+    setMuted(false);
     setStarting(true);
     try {
       await startAudio();
@@ -75,6 +80,7 @@ export default function LiveVoice({ onTextMode }: { onTextMode: () => void }) {
     attempt.current++;
     setConn(null);
     setStarting(false);
+    setMuted(false);
     stopAudio();
   }, []);
 
@@ -137,6 +143,9 @@ export default function LiveVoice({ onTextMode }: { onTextMode: () => void }) {
       heard={conn ? live.heard : ''}
       error={error}
       active={active}
+      canMute={conn !== null}
+      muted={muted}
+      onMute={() => setMuted((m) => !m)}
       micLevel={micLevel}
       speakLevel={speakLevelRef}
       onMic={active ? end : start}
@@ -158,6 +167,7 @@ export default function LiveVoice({ onTextMode }: { onTextMode: () => void }) {
         >
           <Conversation
             onState={setLive}
+            muted={muted}
             micLevel={micLevel}
             speakLevelRef={speakLevelRef}
             onEnd={end}
@@ -179,6 +189,7 @@ const INITIAL_LIVE: LiveState = { phase: 'connecting', heard: '' };
  */
 function Conversation({
   onState,
+  muted,
   micLevel,
   speakLevelRef,
   onEnd,
@@ -186,6 +197,7 @@ function Conversation({
   onConversationId,
 }: {
   onState: (s: LiveState) => void;
+  muted: boolean;
   micLevel: Animated.Value;
   speakLevelRef: { current: number };
   onEnd: () => void;
@@ -194,13 +206,27 @@ function Conversation({
 }) {
   const room = useRoomContext();
   const { state, agent, audioTrack, agentAttributes } = useVoiceAssistant();
-  const { microphoneTrack, isMicrophoneEnabled } = useLocalParticipant();
+  const { localParticipant, microphoneTrack, isMicrophoneEnabled } = useLocalParticipant();
   const agentTrack = audioTrack?.publication?.track as RemoteAudioTrack | undefined;
   const micVolume = useAudioLevel(microphoneTrack?.track as LocalAudioTrack | undefined);
   const agentVolume = useAudioLevel(agentTrack);
   // Anh nói chen vào: giọng Ginger nhỏ dần trước khi server dừng hẳn.
   useDucking(agentTrack, micVolume);
   const [heard, setHeard] = useState('');
+
+  // Tắt/bật micro: LiveKit tắt track (không gỡ khỏi phòng) nên agent không nhận được tiếng nào.
+  // Lúc mới vào phòng LiveKitRoom tự bật micro: chỉ bật lại khi chính anh vừa bỏ tắt, để khỏi bật
+  // chen với nó; anh tắt trước khi micro kịp bật thì micro bật lên xong sẽ bị tắt ngay.
+  const unmuting = useRef(false);
+  useEffect(() => {
+    if (muted) {
+      unmuting.current = true;
+      if (isMicrophoneEnabled) localParticipant.setMicrophoneEnabled(false).catch(() => {});
+    } else if (unmuting.current) {
+      unmuting.current = false;
+      if (!isMicrophoneEnabled) localParticipant.setMicrophoneEnabled(true).catch(() => {});
+    }
+  }, [muted, isMicrophoneEnabled, localParticipant]);
 
   // Agent cần vài giây để vào phòng. Có bộ đệm (web) thì micro đã thu từ lúc này, agent vào
   // sẽ nhận lại phần đã nói, nên hiện "đang nghe" luôn thay vì "đang kết nối".
@@ -315,6 +341,10 @@ function Layout(props: {
   heard: string;
   error: string | null;
   active: boolean;
+  /** Đã vào phòng: hiện nút tắt micro. */
+  canMute: boolean;
+  muted: boolean;
+  onMute: () => void;
   micLevel: Animated.Value;
   speakLevel: { current: number };
   onMic: () => void;
@@ -323,7 +353,7 @@ function Layout(props: {
   /** Phòng LiveKit (không hiện gì, chỉ báo trạng thái lên). */
   children?: ReactNode;
 }) {
-  const { phase, heard, error, active } = props;
+  const { phase, heard, error, active, muted } = props;
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       {/* Đang trò chuyện thì khoá (mờ) hai nút header, không ẩn đi để khỏi nháy. */}
@@ -347,7 +377,11 @@ function Layout(props: {
             {phase === 'speaking' && <SpeakingWave level={props.speakLevel} />}
           </View>
           <View style={styles.caption}>
-            {heard ? <Text style={styles.heard} numberOfLines={4}>{heard}</Text> : null}
+            {props.canMute && muted ? (
+              <Text style={styles.heard}>Micro đang tắt, Gừng không nghe thấy anh</Text>
+            ) : heard ? (
+              <Text style={styles.heard} numberOfLines={4}>{heard}</Text>
+            ) : null}
           </View>
         </View>
 
@@ -358,13 +392,20 @@ function Layout(props: {
               {error}
             </Text>
           )}
-          <MicButton
-            listening={phase === 'listening'}
-            dimmed={phase === 'connecting'}
-            level={props.micLevel}
-            onPress={props.onMic}
-            label={active ? 'Kết thúc trò chuyện' : 'Bắt đầu trò chuyện'}
-          />
+          {/* Nút micro luôn ở giữa; nút tắt micro nằm bên phải, bên trái có chỗ trống cùng cỡ để cân. */}
+          <View style={styles.footerRow}>
+            <View style={styles.sideSlot} />
+            <MicButton
+              listening={phase === 'listening' && !(props.canMute && muted)}
+              dimmed={phase === 'connecting'}
+              level={props.micLevel}
+              onPress={props.onMic}
+              label={active ? 'Kết thúc trò chuyện' : 'Bắt đầu trò chuyện'}
+            />
+            <View style={styles.sideSlot}>
+              {props.canMute && <MuteButton muted={muted} onPress={props.onMute} />}
+            </View>
+          </View>
         </View>
       </View>
       {props.children}

@@ -229,6 +229,9 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
   LiveVoice chỉ có một cây `Layout`; phòng LiveKit là con không vẽ gì, báo trạng thái lên qua
   `onState`. Vẽ Layout riêng trong phòng thì lúc vào phòng React dựng lại: icon header và
   hiệu ứng kết nối nháy.
+- Nút tắt micro (`MuteButton` trong ui.tsx, bên phải nút micro, chỉ hiện khi đã vào phòng): `setMicrophoneEnabled(false)`
+  (tắt track, không rời phòng), vẫn nghe Gừng nói; nền đỏ cam + icon gạch chéo + dòng "Micro đang tắt…". Bắt đầu lại
+  thì micro bật. Agent vẫn tính im lặng như thường: tắt quá 20s thì phiên tự kết thúc. Chưa thử trên iPhone.
 - Câu còn dở (`looks_incomplete` + `Ginger.stt_node` trong agent.py): Soniox chốt lượt sau ~0,5s im, anh ngập
   ngừng là câu vỡ thành nhiều tin ("Thì." "Cái." "Trong." "Game."), Gừng trả lời chen rồi bị ngắt (log thật: 6/15
   lần gọi Claude bị bỏ). Đoạn STT vừa chốt mà dừng ở chữ nối (là, thì, của, trong…), toàn tiếng đệm (à, ờ), có

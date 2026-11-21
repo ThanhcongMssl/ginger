@@ -72,6 +72,26 @@ export function MicButton(props: {
 }
 
 /**
+ * Nút tắt/bật micro cạnh nút micro chính. Đang tắt: nền đỏ cam, icon micro gạch chéo; đang bật: viền
+ * vàng nhạt, icon micro thường.
+ */
+export function MuteButton({ muted, onPress }: { muted: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={8}
+      style={[styles.muteBtn, muted && styles.muteBtnOn]}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: muted }}
+      accessibilityLabel={muted ? 'Bật lại micro' : 'Tắt micro'}
+    >
+      {muted ? <MicOffIcon color="#FFF" size={26} /> : <MicIcon color={C.ink} size={26} />}
+      <Text style={[styles.muteText, muted && styles.muteTextOn]}>{muted ? 'Đang tắt' : 'Tắt mic'}</Text>
+    </Pressable>
+  );
+}
+
+/**
  * Ba thanh vàng nhấp nhô lần lượt qua lại (boomerang): đang kết nối, Gừng CHƯA nghe được. Phải khác hẳn
  * quả cầu "đang nghĩ" để anh không tưởng Gừng đã nghe mà nói luôn (mất đoạn đầu).
  */
@@ -326,6 +346,20 @@ export function MicIcon({ size = 44, color = '#FFF' }: { size?: number; color?: 
   );
 }
 
+/** Icon micro gạch chéo (đang tắt micro), nét vẽ theo bộ Lucide. */
+export function MicOffIcon({ size = 44, color = '#FFF' }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M2 2l20 20" />
+      <Path d="M18.89 13.23A7 7 0 0 0 19 12v-1" />
+      <Path d="M5 10v2a7 7 0 0 0 12 5" />
+      <Path d="M15 9.34V5a3 3 0 0 0-5.68-1.33" />
+      <Path d="M9 9v3a3 3 0 0 0 5.12 2.12" />
+      <Path d="M12 19v3" />
+    </Svg>
+  );
+}
+
 /** Logo chữ "Ginger" font tròn, "ger" màu vàng. */
 export function Logo() {
   return (
@@ -364,6 +398,21 @@ export const styles = StyleSheet.create({
   footerError: { position: 'absolute', top: -14, left: 24, right: 24, fontSize: 15, lineHeight: 20, color: C.error, textAlign: 'center' },
   // Chừa chỗ cho quầng sáng quanh nút micro (phồng tới ~1,9 lần).
   footer: { alignItems: 'center', paddingBottom: 56, paddingTop: 48 },
+  footerRow: { flexDirection: 'row', alignItems: 'center', gap: 28 },
+  sideSlot: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center' },
+  muteBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.bg,
+    borderWidth: 2,
+    borderColor: C.line,
+  },
+  muteBtnOn: { backgroundColor: C.error, borderColor: C.error },
+  muteText: { fontSize: 10, color: C.muted, marginTop: 1 },
+  muteTextOn: { color: '#FFF', fontWeight: '600' },
   micWrap: { alignItems: 'center', justifyContent: 'center' },
   micHalo: { position: 'absolute', width: 92, height: 92, borderRadius: 46, backgroundColor: C.listening },
   talkBtn: {
