@@ -87,12 +87,13 @@ export function MuteButton({ muted, onPress }: { muted: boolean; onPress: () => 
     <Pressable
       onPress={onPress}
       hitSlop={14}
-      style={[styles.muteBtn, muted && styles.muteBtnOn]}
+      style={[styles.muteBtn, muted ? styles.muteBtnOn : styles.muteBtnOff]}
       accessibilityRole="switch"
       accessibilityState={{ checked: muted }}
       accessibilityLabel={muted ? 'Bật lại micro' : 'Tắt micro'}
     >
-      <MicOffIcon color={muted ? '#FFF' : C.ink} size={26} />
+      {/* Viền luôn cùng màu icon (khác nút dừng: nền đặc màu ink). */}
+      <MicOffIcon color={muted ? C.error : C.ink} size={26} />
     </Pressable>
   );
 }
@@ -439,7 +440,8 @@ export const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: C.line,
   },
-  muteBtnOn: { backgroundColor: C.error, borderColor: C.error },
+  muteBtnOff: { borderColor: C.ink },
+  muteBtnOn: { backgroundColor: '#FBE3CC', borderColor: C.error },
   stopBtnOn: { backgroundColor: C.ink, borderColor: C.ink },
   sideBtnDisabled: { opacity: 0.35 },
   micWrap: { alignItems: 'center', justifyContent: 'center' },
