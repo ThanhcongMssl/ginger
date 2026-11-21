@@ -300,7 +300,7 @@ export default function ExpoGoVoice({ onTextMode }: { onTextMode: () => void }) 
         </View>
         <View style={styles.caption}>
           {heard ? <Text style={styles.heard} numberOfLines={4}>{heard}</Text> : null}
-          {error && <Text style={styles.error}>{error}</Text>}
+          {error && <Text style={styles.error} numberOfLines={1}>{error}</Text>}
         </View>
       </View>
 

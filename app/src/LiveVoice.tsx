@@ -354,7 +354,7 @@ function Layout(props: {
         <View style={styles.footer}>
           {/* Lỗi nằm trên phần đất, ngay trên nút micro: không đè lên cây gừng. */}
           {error && (
-            <Text style={styles.footerError} numberOfLines={2}>
+            <Text style={styles.footerError} numberOfLines={1}>
               {error}
             </Text>
           )}

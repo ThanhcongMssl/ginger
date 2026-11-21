@@ -5,7 +5,7 @@
 const NETWORK =
   /fetch failed|network|tls|ssl|secure connection|timed? ?out|offline|load failed|failed to fetch|could not connect|connection|websocket|pc connection|signal/i;
 
-export const MSG_NETWORK = 'Chưa kết nối được tới Gừng. Kiểm tra mạng rồi thử lại nhé.';
+export const MSG_NETWORK = 'Mất kết nối, kiểm tra mạng rồi thử lại nhé.';
 export const MSG_SERVER = 'Gừng đang gặp trục trặc, thử lại sau một lát nhé.';
 
 export function friendlyError(e: unknown, fallback: string): string {
