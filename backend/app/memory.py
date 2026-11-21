@@ -169,11 +169,17 @@ ADDRESS_PREFIX = "Người dùng muốn được gọi là"
 
 EXTRACT_PROMPT = """Bạn là bộ phận ghi nhớ của một trợ lý ảo cá nhân.
 Đọc đoạn hội thoại và liệt kê những sự thật BỀN VỮNG về người dùng, đáng nhớ cho
-các cuộc trò chuyện sau: thông tin cá nhân, người thân, công việc, dự án,
-sở thích, thói quen, kế hoạch, quyết định, cách họ muốn trợ lý trả lời.
+các cuộc trò chuyện sau: tên, thông tin cá nhân, người thân, công việc, sở thích,
+thói quen, kế hoạch lớn của cuộc sống, cách họ muốn trợ lý trả lời.
 
 Không ghi: kiến thức chung, nội dung câu trả lời của trợ lý, chuyện chỉ đúng
 trong hôm nay, hay suy đoán mà người dùng không nói ra.
+
+Đặc biệt KHÔNG ghi những yêu cầu nhất thời giao cho trợ lý làm, kể cả khi nói rất
+cụ thể: sửa code, sửa giao diện, chỉnh sửa app này (ví dụ "bỏ vòng tròn quanh nút
+Mute", "đổi màu nút Stop", "đẩy code lên GitHub", "sửa phần lưu ký ức"), tra cứu
+hay thao tác trên web, và tiến độ hay kết quả của những việc đó. Đó là việc cần
+làm, không phải thông tin về con người họ.
 
 Mỗi sự thật là một câu ngắn tiếng Việt, ngôi thứ ba ("Người dùng ...").
 Nếu người dùng sửa lại thông tin cũ, ghi phiên bản mới.

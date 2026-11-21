@@ -113,6 +113,8 @@ App mobile trợ lý ảo dựa trên AI:
 2. Tóm tắt: mỗi cuộc có một bản tóm tắt, cập nhật sau mỗi 6 tin; đưa tóm tắt 3 cuộc gần nhất vào prompt
 3. Dài hạn: sau mỗi lượt, Haiku trích các sự thật về người dùng → embed → lưu vào
    bảng `memories`. Ký ức có cosine ≥ 0.88 với ký ức cũ thì ghi đè lên ký ức cũ.
+   Prompt trích (`EXTRACT_PROMPT`) cấm ghi yêu cầu nhất thời giao cho Gừng (sửa code/giao diện app,
+   push GitHub, tra web) và tiến độ của chúng; chỉ ghi thông tin bền vững về con người.
    Khi chat: tổng số ký ức ≤ 40 (`MEMORY_INLINE_MAX`) thì đưa hết vào prompt, không gọi Voyage
    (embedding câu hỏi mất 0,4–1,2s ngay trước Claude); nhiều hơn thì lấy top 8 ký ức liên quan.
 Việc cập nhật bộ nhớ chạy trong BackgroundTask sau khi stream xong.
