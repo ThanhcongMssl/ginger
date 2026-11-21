@@ -232,6 +232,10 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
 - Nút tắt micro (`MuteButton` trong ui.tsx, bên phải nút micro, chỉ hiện khi đã vào phòng): `setMicrophoneEnabled(false)`
   (tắt track, không rời phòng), vẫn nghe Gừng nói; nền đỏ cam + icon gạch chéo + dòng "Micro đang tắt…". Bắt đầu lại
   thì micro bật. Agent vẫn tính im lặng như thường: tắt quá 20s thì phiên tự kết thúc. Chưa thử trên iPhone.
+- Nút dừng (`StopButton`, bên trái nút micro, đối xứng nút tắt micro; chỉ bấm được lúc Gừng đang nói / đang nghĩ):
+  app tắt tiếng track của Gừng ngay (`useDucking(..., silenced)`) và gọi RPC `stop_speaking` tới agent →
+  `session.interrupt(force=True)` (cả câu đọc kết quả việc nền), phần đã đọc vẫn lưu, phiên không kết thúc; agent quay
+  về nghe thì app bật lại tiếng. Chưa thử với LiveKit thật.
 - Câu còn dở (`looks_incomplete` + `Ginger.stt_node` trong agent.py): Soniox chốt lượt sau ~0,5s im, anh ngập
   ngừng là câu vỡ thành nhiều tin ("Thì." "Cái." "Trong." "Game."), Gừng trả lời chen rồi bị ngắt (log thật: 6/15
   lần gọi Claude bị bỏ). Đoạn STT vừa chốt mà dừng ở chữ nối (là, thì, của, trong…), toàn tiếng đệm (à, ờ), có

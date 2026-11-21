@@ -456,6 +456,19 @@ async def entrypoint(ctx: JobContext) -> None:
             _mic_ready()
 
     await session.start(agent=agent, room=ctx.room, room_options=room_opts)
+
+    # Nút dừng trên app (LiveVoice.tsx): ngắt câu đang đọc / lượt đang trả lời nhưng giữ phiên.
+    # force: cả câu đọc kết quả việc nền cũng dừng. Phần đã đọc vẫn được lưu (_on_item).
+    async def _stop_speaking(_data: rtc.RpcInvocationData) -> str:
+        if session.agent_state in ("speaking", "thinking"):
+            log.info("Anh bấm dừng, ngắt lượt trả lời")
+            try:
+                await session.interrupt(force=True)
+            except RuntimeError:
+                log.exception("Không ngắt được lượt trả lời")
+        return "ok"
+
+    ctx.room.local_participant.register_rpc_method("stop_speaking", _stop_speaking)
     await ctx.room.local_participant.set_attributes({"conversation_id": str(conv_id)})
     _spawn(_mic_ready_fallback())
     _spawn(_announce_task_results())

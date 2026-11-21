@@ -92,6 +92,29 @@ export function MuteButton({ muted, onPress }: { muted: boolean; onPress: () => 
 }
 
 /**
+ * Nút dừng, đối xứng với nút tắt micro. Chỉ bấm được lúc Gừng đang nói / đang nghĩ: dừng câu trả lời,
+ * cuộc trò chuyện vẫn tiếp tục.
+ */
+export function StopButton({ enabled, onPress }: { enabled: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={!enabled}
+      hitSlop={8}
+      style={[styles.muteBtn, enabled ? styles.stopBtnOn : styles.sideBtnDisabled]}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: !enabled }}
+      accessibilityLabel="Dừng câu trả lời"
+    >
+      <Svg width={22} height={22} viewBox="0 0 24 24">
+        <Rect x={5} y={5} width={14} height={14} rx={3} fill={enabled ? '#FFF' : C.ink} />
+      </Svg>
+      <Text style={[styles.muteText, enabled && styles.muteTextOn]}>Dừng</Text>
+    </Pressable>
+  );
+}
+
+/**
  * Ba thanh vàng nhấp nhô lần lượt qua lại (boomerang): đang kết nối, Gừng CHƯA nghe được. Phải khác hẳn
  * quả cầu "đang nghĩ" để anh không tưởng Gừng đã nghe mà nói luôn (mất đoạn đầu).
  */
@@ -411,6 +434,8 @@ export const styles = StyleSheet.create({
     borderColor: C.line,
   },
   muteBtnOn: { backgroundColor: C.error, borderColor: C.error },
+  stopBtnOn: { backgroundColor: C.ink, borderColor: C.ink },
+  sideBtnDisabled: { opacity: 0.35 },
   muteText: { fontSize: 10, color: C.muted, marginTop: 1 },
   muteTextOn: { color: '#FFF', fontWeight: '600' },
   micWrap: { alignItems: 'center', justifyContent: 'center' },

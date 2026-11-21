@@ -27,11 +27,17 @@ const TICK_MS = 20;
  * đầu tiên mới dừng hẳn (để tiếng ồn không làm Ginger dừng); lúc đó giọng đã nhỏ nên không
  * nghe thấy bị cắt cái phụt. Nếu không phải ngắt lời thì giọng Ginger to trở lại.
  */
-export function useDucking(agentTrack: RemoteAudioTrack | undefined, micLevel: number) {
+export function useDucking(agentTrack: RemoteAudioTrack | undefined, micLevel: number, silenced = false) {
   const level = useRef(0);
   useEffect(() => {
     level.current = micLevel;
   }, [micLevel]);
+  // Anh bấm nút dừng: tắt hẳn giọng Ginger ngay trên máy, không chờ agent ngắt xong.
+  const mute = useRef(silenced);
+  useEffect(() => {
+    mute.current = silenced;
+    if (silenced) agentTrack?.setVolume(0);
+  }, [silenced, agentTrack]);
 
   useEffect(() => {
     if (!agentTrack) return;
@@ -55,8 +61,9 @@ export function useDucking(agentTrack: RemoteAudioTrack | undefined, micLevel: n
         if (talking && now - lastAbove >= RELEASE_MS) talking = false;
       }
       const target = talking ? DUCK_VOLUME : 1;
-      const next =
-        target < gain
+      const next = mute.current
+        ? 0
+        : target < gain
           ? Math.max(target, gain - TICK_MS / FADE_DOWN_MS)
           : Math.min(target, gain + TICK_MS / FADE_UP_MS);
       if (next !== gain) {
