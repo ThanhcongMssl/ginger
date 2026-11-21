@@ -24,7 +24,7 @@ const BAR_H = 44;
 /** Nút micro và quầng sáng quanh nó: nút hai bên phải nằm ngoài quầng lúc phồng to nhất. */
 const MIC_SIZE = 92;
 const HALO_MAX_SCALE = 2.3;
-const SIDE_SIZE = 64;
+const SIDE_SIZE = 52;
 /** Khoảng cách mép nút micro tới mép nút hai bên = bán kính quầng lớn nhất − bán kính nút micro + 8. */
 const SIDE_GAP = Math.ceil((MIC_SIZE * HALO_MAX_SCALE) / 2 - MIC_SIZE / 2) + 8;
 
@@ -86,7 +86,7 @@ export function MuteButton({ muted, onPress }: { muted: boolean; onPress: () => 
   return (
     <Pressable
       onPress={onPress}
-      hitSlop={8}
+      hitSlop={14}
       style={[styles.muteBtn, muted && styles.muteBtnOn]}
       accessibilityRole="switch"
       accessibilityState={{ checked: muted }}
@@ -106,7 +106,7 @@ export function StopButton({ enabled, onPress }: { enabled: boolean; onPress: ()
     <Pressable
       onPress={onPress}
       disabled={!enabled}
-      hitSlop={8}
+      hitSlop={14}
       style={[styles.muteBtn, enabled ? styles.stopBtnOn : styles.sideBtnDisabled]}
       accessibilityRole="button"
       accessibilityState={{ disabled: !enabled }}
