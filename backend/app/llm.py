@@ -98,7 +98,7 @@ class PromptContext:
     model: "ChatModel"  # model người dùng chọn trong Cài đặt (chat_models.py)
     user_id: UUID | None = None  # để tool browser_task ghi việc đúng tài khoản, cuộc trò chuyện
     conversation_id: UUID | None = None
-    tasks: str = ""  # việc trình duyệt đang làm / đang chờ (browser.status_for_prompt): đổi mỗi lượt
+    tasks: str = ""  # việc trình duyệt / sửa code đang làm, đang chờ (status_for_prompt): đổi mỗi lượt
 
 
 def system_prompt(ctx: PromptContext) -> str:
@@ -173,7 +173,7 @@ WEB_FETCH = {
     },
 }
 MAX_PAUSES = 3
-# Mỗi lượt: tối đa chừng này lần Claude dừng để backend chạy tool (browser_task) rồi nói tiếp.
+# Mỗi lượt: tối đa chừng này lần Claude dừng để backend chạy tool (browser_task, dev_task) rồi nói tiếp.
 MAX_TOOL_ROUNDS = 2
 
 
@@ -182,7 +182,12 @@ async def stream_reply(context: PromptContext, messages: list[dict]) -> AsyncIte
     msgs = build_messages(context, messages)
     # Câu dẫn ("Để Gừng xem nhé.") và câu trả lời là hai khối chữ tách nhau bởi khối tool:
     # chèn dấu cách, không thì dính liền. Khối chữ kèm trích dẫn liền nhau thì nối thẳng.
-    from . import browser  # nạp muộn: browser.py import llm
+    from . import browser, dev  # nạp muộn: browser.py, dev.py import llm
+
+    tools = [WEB_SEARCH, WEB_FETCH, browser.BROWSER_TOOL]
+    if dev.allowed(context.user_id):  # chỉ chủ máy được sửa mã nguồn
+        tools.append(dev.DEV_TOOL)
+    handlers = {browser.BROWSER_TOOL["name"]: browser.handle_tool, dev.DEV_TOOL["name"]: dev.handle_tool}
 
     said, after_tool = False, False
     tool_rounds = 0
@@ -192,7 +197,7 @@ async def stream_reply(context: PromptContext, messages: list[dict]) -> AsyncIte
             max_tokens=1024,
             system=system_prompt(context),
             messages=msgs,
-            tools=[WEB_SEARCH, WEB_FETCH, browser.BROWSER_TOOL],
+            tools=tools,
             # Tắt thinking + effort thấp tuỳ model (chat_models._params). Để mặc định
             # (adaptive + effort high) thì Sonnet chờ ~4s mới ra chữ đầu.
             **model.params,
@@ -225,8 +230,9 @@ async def stream_reply(context: PromptContext, messages: list[dict]) -> AsyncIte
         for b in final.content:
             if b.type != "tool_use":
                 continue
-            if b.name == browser.BROWSER_TOOL["name"] and context.user_id and context.conversation_id:
-                ok, out = await browser.handle_tool(context.user_id, context.conversation_id, b.input)
+            handler = handlers.get(b.name)
+            if handler and context.user_id and context.conversation_id:
+                ok, out = await handler(context.user_id, context.conversation_id, b.input)
             else:
                 ok, out = False, "Công cụ này chưa dùng được."
             all_ok = all_ok and ok

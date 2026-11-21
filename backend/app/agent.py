@@ -41,7 +41,7 @@ from livekit.agents import (
 from livekit import rtc
 from livekit.plugins import krisp, silero, soniox
 
-from . import accounts, browser, chat_models, memory
+from . import accounts, browser, chat_models, dev, memory
 from .config import settings
 from .db import init_db
 from .llm import FALLBACK_REPLY, stream_reply
@@ -54,7 +54,7 @@ AGENT_NAME = "ginger"
 AWAY_TIMEOUT_SEC = 20
 # Báo sẵn sàng dù chưa thấy âm thanh từ micro sau chừng này giây kể từ khi phiên bắt đầu.
 MIC_READY_FALLBACK_SEC = 6
-# Hỏi DB xem trình duyệt đã làm xong việc nào để đọc kết quả (browser.py).
+# Hỏi DB xem trình duyệt / phần sửa code đã làm xong việc nào để đọc kết quả (browser.py, dev.py).
 ANNOUNCE_POLL_SEC = 2
 # Trình duyệt đang làm việc thì im lặng cũng chưa kết thúc phiên (để đọc kết quả), tối đa chừng này.
 BROWSER_WAIT_MAX_SEC = 420
@@ -418,16 +418,17 @@ async def entrypoint(ctx: JobContext) -> None:
         if ev.new_state == "away":
             _spawn(_end_when_idle())
 
-    async def _announce_browser_results() -> None:
+    async def _announce_task_results() -> None:
         # Kết quả đã nằm trong lịch sử trò chuyện (worker ghi), ở đây chỉ đọc lên.
         while True:
             await asyncio.sleep(ANNOUNCE_POLL_SEC)
             try:
-                for t in await browser.pending_announcements(user_id):
-                    await browser.mark_announced(t["id"])
-                    log.info("Đọc kết quả trình duyệt: %r", t["result"])
-                    agent.note_said(t["result"])
-                    session.say(t["result"], add_to_chat_ctx=False)
+                for mod in (browser, dev):  # trình duyệt, sửa code
+                    for t in await mod.pending_announcements(user_id):
+                        await mod.mark_announced(t["id"])
+                        log.info("Đọc kết quả %s: %r", mod.__name__, t["result"])
+                        agent.note_said(t["result"])
+                        session.say(t["result"], add_to_chat_ctx=False)
             except Exception:
                 log.exception("Lỗi khi đọc kết quả trình duyệt")
 
@@ -448,7 +449,7 @@ async def entrypoint(ctx: JobContext) -> None:
     await session.start(agent=agent, room=ctx.room, room_options=room_opts)
     await ctx.room.local_participant.set_attributes({"conversation_id": str(conv_id)})
     _spawn(_mic_ready_fallback())
-    _spawn(_announce_browser_results())
+    _spawn(_announce_task_results())
 
 
 _background: set[asyncio.Task] = set()

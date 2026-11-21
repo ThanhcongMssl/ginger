@@ -282,15 +282,17 @@ async def build_context(
 ) -> tuple[PromptContext, list[dict]]:
     """Trả về (ký ức + tóm tắt để đưa vào prompt, lịch sử gần đây)."""
     # Chạy song song: tìm ký ức (gọi Voyage) là bước chậm nhất.
-    from . import browser  # nạp muộn: browser.py import memory
+    from . import browser, dev  # nạp muộn: browser.py, dev.py import memory
 
-    memories, summaries, messages, model, tasks = await asyncio.gather(
+    memories, summaries, messages, model, browser_tasks, dev_tasks = await asyncio.gather(
         search_memories(user_id, user_text),
         recent_summaries(user_id, exclude=conversation_id),
         history_window(conversation_id),
         chat_models.current(user_id),
         browser.status_for_prompt(user_id),
+        dev.status_for_prompt(user_id),
     )
+    tasks = "\n".join(t for t in (browser_tasks, dev_tasks) if t)
 
     return PromptContext(
         memories="\n".join(f"- {m['content']}" for m in memories),

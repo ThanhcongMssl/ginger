@@ -50,6 +50,9 @@ class Settings:
 
     # Trình duyệt cho Gừng thao tác (container `browser` trong docker-compose.yml, app/browser.py).
     browser_mcp_url: str = os.getenv("BROWSER_MCP_URL", "http://127.0.0.1:8931/mcp")
+    # Gừng tự sửa mã nguồn (app/dev.py): chỉ các tài khoản này có tool dev_task (cách nhau dấu phẩy).
+    dev_user_ids: frozenset[str] = frozenset(x.strip() for x in os.getenv("DEV_USER_IDS", "").split(",") if x.strip())
+    dev_model: str = os.getenv("DEV_MODEL", "opus")  # model của Claude Code (tên tắt của CLI)
 
     # Thư mục bản web đã build của app.
     web_dir: str = os.getenv("WEB_DIR", str(Path(__file__).resolve().parents[2] / "app" / "dist"))

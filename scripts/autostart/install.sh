@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
-# Cài tự khởi động cho backend + agent + worker trình duyệt sau khi bật máy (chạy một lần, trong WSL):
+# Cài tự khởi động cho backend + agent + worker trình duyệt + worker sửa code sau khi bật máy (chạy một lần, trong WSL):
 #
 #   bash scripts/autostart/install.sh
 #
 # Chuỗi khởi động sau khi cài:
 #   Windows đăng nhập → Docker Desktop tự mở → Postgres lên (restart: unless-stopped)
 #                     → task "Ginger" (Task Scheduler) giữ WSL chạy + cập nhật portproxy 8000 → IP WSL
-#   WSL bật → systemd user (linger) chạy ginger-backend + ginger-agent + ginger-browser, chết thì tự chạy lại
+#   WSL bật → systemd user (linger) chạy ginger-backend + ginger-agent + ginger-browser + ginger-dev, chết thì tự chạy lại
 #   Tailscale Funnel tự giữ cấu hình, không cần làm gì.
 #
 # Lệnh hằng ngày:
-#   systemctl --user status ginger-backend ginger-agent ginger-browser
+#   systemctl --user status ginger-backend ginger-agent ginger-browser ginger-dev
 #   systemctl --user restart ginger-agent      # sau khi sửa agent.py (agent không tự nạp lại)
 #   systemctl --user restart ginger-browser    # sau khi sửa browser.py
+#   systemctl --user restart ginger-dev        # sau khi sửa dev.py
 #   journalctl --user -u ginger-agent -f       # xem log
 #   systemctl --user stop ginger-backend ginger-agent   # muốn tự chạy tay trong terminal
 set -euo pipefail
@@ -63,8 +64,21 @@ RestartSec=5
 [Install]
 WantedBy=default.target
 EOF
+cat > "$units/ginger-dev.service" <<EOF
+[Unit]
+Description=Ginger worker sửa mã nguồn (Gừng tự sửa code bằng Claude Code, app/dev.py)
+
+[Service]
+WorkingDirectory=$be
+ExecStart=$be/.venv/bin/python -m app.dev
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
 systemctl --user daemon-reload
-systemctl --user enable ginger-backend ginger-agent ginger-browser
+systemctl --user enable ginger-backend ginger-agent ginger-browser ginger-dev
 
 # 2. Linger: dịch vụ user chạy ngay khi WSL bật, không cần mở terminal.
 if [ "$(loginctl show-user "$USER" -p Linger --value)" != yes ]; then
@@ -82,6 +96,6 @@ cp "$repo/scripts/autostart/windows-logon.ps1" "$repo/scripts/autostart/register
 echo "Đăng ký task Windows: bấm Yes ở hộp thoại UAC."
 powershell.exe -NoProfile -Command "Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','$(wslpath -w "$win_dir/register-task.ps1")','-Distro','$WSL_DISTRO_NAME'"
 
-systemctl --user restart ginger-backend ginger-agent ginger-browser
+systemctl --user restart ginger-backend ginger-agent ginger-browser ginger-dev
 sleep 3
-systemctl --user --no-pager status ginger-backend ginger-agent ginger-browser | grep -E '●|Active:'
+systemctl --user --no-pager status ginger-backend ginger-agent ginger-browser ginger-dev | grep -E '●|Active:'

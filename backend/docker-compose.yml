@@ -4,10 +4,12 @@ services:
     restart: unless-stopped  # Docker Desktop mở lúc đăng nhập Windows là Postgres lên theo
     environment:
       POSTGRES_USER: troly
-      POSTGRES_PASSWORD: troly
+      # Lấy từ backend/.env (compose tự đọc), không ghi ở đây vì repo public. Chỉ có tác dụng lúc tạo DB lần
+      # đầu; DB đã có thì đổi bằng ALTER USER troly PASSWORD '...'; rồi sửa cả DATABASE_URL.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Thiếu POSTGRES_PASSWORD trong backend/.env}
       POSTGRES_DB: troly
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"  # không mở ra mạng LAN
     volumes:
       - pgdata:/var/lib/postgresql/data
   # Trình duyệt cho Gừng thao tác (app/browser.py nối vào qua MCP). Chạy trong container riêng:

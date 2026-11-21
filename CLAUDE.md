@@ -52,6 +52,27 @@ App mobile trợ lý ảo dựa trên AI:
   Tên trang hay bị STT nghe sai: Gừng và trình duyệt đều được dặn đoán trang thật. Đo (client giả bằng giọng):
   tra phim đang chiếu 10–20s, ~25–45 nghìn token (phần lớn đọc từ cache); điền form + hỏi + gửi ~16s.
   Chế độ gõ chữ chưa tự hiện kết quả (mở lại chat mới thấy). Sửa browser.py thì `systemctl --user restart ginger-browser`.
+- Gừng tự sửa mã nguồn (`backend/app/dev.py`): client tool `dev_task` (new / approve / revise / cancel), chỉ tài
+  khoản trong `DEV_USER_IDS` (`backend/.env`) mới có tool này. Worker `ginger-dev` (systemd, `python -m app.dev`) clone
+  repo ra `~/.local/share/ginger-dev/wt/<id>` (nhánh `gung/<id>`) rồi chạy `claude -p` (Claude Code, model `opus`,
+  tính vào gói subscription qua `CLAUDE_CODE_OAUTH_TOKEN`, không dùng `ANTHROPIC_API_KEY`) trong sandbox bwrap: chỉ
+  thấy bản clone, venv/node_modules (chỉ đọc) và HOME riêng; giấu nhà anh (repo gốc, .env, ~/.zshrc, ~/.ssh), /mnt
+  (ổ Windows, chạy .exe), /run (systemd, Docker socket). Sandbox không có mạng (`--unshare-net`: không tới được
+  Postgres, cổng nào trên máy hay Internet); lối ra duy nhất là proxy trong worker (unix socket, chỉ `POST
+  /v1/messages*` tới api.anthropic.com) tự gắn token thật, trong sandbox chỉ có token giả. Tắt WebFetch; WebSearch
+  chạy phía Anthropic nên vẫn dùng được. Cài gói: proxy CONNECT thứ hai chỉ cho tới npm, PyPI, api.expo.dev,
+  reactnative.directory (`REGISTRY_HOSTS`); venv và node_modules trong sandbox là overlay riêng từng việc chồng lên
+  bản thật (cài thoải mái, bản thật không đổi). Lúc áp dụng, đổi `requirements.txt` / `package.json` thì dev.py cài
+  vào bản thật cũng trong sandbox (chỉ thấy đúng venv hay node_modules, mạng chỉ tới kho gói), vì cài gói là chạy
+  script của gói. Gói native của app thì `ota.sh` từ chối, phải build lại trên Mac.
+  Xong thì đọc tóm tắt và hỏi từng bước, anh đồng ý (Gừng gọi `approve`) mới làm: review → gộp ff vào main + khởi
+  động lại backend/agent/browser (import thử trước; agent không "registered worker" trong 45s thì `git reset --keep`
+  về bản cũ, lỗi đưa cho Claude khi anh bảo sửa tiếp) → ota (chỉ khi đổi `app/`, chạy `scripts/ota.sh`) → push (quét
+  mẫu trong `~/.config/ginger/push-deny.txt` ngoài repo + giá trị trong hai file .env). Mọi bước chạm máy thật do
+  dev.py làm, không phải Claude; không chạy git ngoài sandbox trong bản clone (hook do Claude viết), code ra bằng
+  git bundle. Kết quả đọc lên trong 2 giờ. Đo: câu hỏi về code ~15s, sửa một dòng ~18s, áp dụng (gộp + khởi động
+  lại + kiểm tra) ~21s. Đã thử: repo đang sửa dở trùng file thì từ chối gộp; cố ý làm worker trình duyệt chết lúc
+  khởi động thì sau ~57s tự quay về bản cũ (dịch vụ phải chạy liền 12s cùng PID mới tính là lên).
 - Xưng hô (`PERSONA` trong backend/app/llm.py): trợ lý tự xưng "Gừng", mặc định gọi người
   dùng là "anh". Không có màn cài đặt: người dùng nói "gọi tôi là chị/bạn…" thì Gừng đổi ngay,
   và ký ức lưu thành câu cố định "Người dùng muốn được gọi là …"
@@ -229,7 +250,8 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
 - Điện thoại thường không vào thẳng được IP của WSL:
   - Expo: chạy `npx expo start --tunnel`
   - Backend: mở port 8000 bằng WSL mirrored networking, hoặc `netsh interface portproxy`
-- Postgres chạy bằng `docker.exe compose up -d` (Docker Desktop, chưa bật WSL integration)
+- Postgres chạy bằng `docker.exe compose up -d` (Docker Desktop, chưa bật WSL integration). Mật khẩu là chuỗi ngẫu nhiên
+  `POSTGRES_PASSWORD` trong `backend/.env` (compose tự đọc, phải khớp `DATABASE_URL`), cổng chỉ mở trên 127.0.0.1
 - Điện thoại gọi backend qua Tailscale Funnel (HTTPS công khai, dev build bị ATS chặn http):
   `EXPO_PUBLIC_API_URL=https://<máy>.<tailnet>.ts.net` (`tailscale funnel --bg 8000` trên Windows;
   điện thoại không cần cài Tailscale). Backend mở ra Internet nên `APP_TOKEN` là lớp bảo vệ duy nhất:
@@ -238,8 +260,8 @@ Log `Claude usage: ...` để kiểm tra cache read/write.
   Windows `netsh portproxy` 8000 → IP WSL (đổi sau mỗi lần reboot)
 - Expo CLI đăng nhập bằng `EXPO_TOKEN` trong `~/.zshrc`; chạy `npx expo start --tunnel`
   (dev build: thêm `--dev-client`)
-- Tự khởi động sau khi bật máy (`scripts/autostart/install.sh`, chạy một lần): backend, agent và worker trình
-  duyệt là dịch vụ systemd user `ginger-backend` / `ginger-agent` / `ginger-browser` (linger, tự chạy lại khi chết); task Windows
+- Tự khởi động sau khi bật máy (`scripts/autostart/install.sh`, chạy một lần): backend, agent, worker trình
+  duyệt và worker sửa code là dịch vụ systemd user `ginger-backend` / `ginger-agent` / `ginger-browser` / `ginger-dev` (linger, tự chạy lại khi chết); task Windows
   "Ginger" lúc đăng nhập giữ WSL chạy và trỏ portproxy 8000 sang IP WSL mới; Postgres
   `restart: unless-stopped`, Docker Desktop tự mở (lên sau WSL nên `init_db` chờ Postgres tối đa 3 phút;
   uvicorn `--reload` giữ process cha khi app lỗi khởi động, systemd không biết mà chạy lại). Sửa agent.py thì `systemctl --user restart

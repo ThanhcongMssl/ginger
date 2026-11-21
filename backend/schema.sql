@@ -82,3 +82,29 @@ CREATE TABLE IF NOT EXISTS browser_tasks (
     finished_at      TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS browser_tasks_user_idx ON browser_tasks (user_id, created_at DESC);
+
+-- Việc Gừng sửa mã nguồn của chính mình (app/dev.py, worker ginger-dev). 'waiting' = chờ người dùng
+-- trả lời ở bước `stage`: review (áp dụng bản sửa?) → ota (đẩy bản cập nhật app?) → push (lên GitHub?).
+-- 'approved' = người dùng đồng ý, worker làm bước đó.
+CREATE TABLE IF NOT EXISTS dev_tasks (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id          UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    conversation_id  UUID REFERENCES conversations(id) ON DELETE SET NULL,
+    instruction      TEXT NOT NULL,
+    status           TEXT NOT NULL DEFAULT 'queued'
+                     CHECK (status IN ('queued', 'running', 'waiting', 'approved', 'done', 'failed', 'cancelled')),
+    stage            TEXT NOT NULL DEFAULT 'review' CHECK (stage IN ('review', 'ota', 'push')),
+    pending_input    TEXT,          -- lời dặn sửa thêm (revise)
+    session_id       TEXT,          -- phiên Claude Code để --resume
+    base_commit      TEXT,
+    files            TEXT[],
+    last_error       TEXT,          -- lỗi lần áp dụng trước, đưa cho Claude khi sửa tiếp
+    applied_from     TEXT,
+    applied_to       TEXT,
+    progress         TEXT,
+    result           TEXT,
+    announced        BOOLEAN NOT NULL DEFAULT false,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at      TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS dev_tasks_user_idx ON dev_tasks (user_id, created_at DESC);
