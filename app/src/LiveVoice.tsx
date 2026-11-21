@@ -409,9 +409,7 @@ function Layout(props: {
             {phase === 'speaking' && <SpeakingWave level={props.speakLevel} />}
           </View>
           <View style={styles.caption}>
-            {props.canMute && muted ? (
-              <Text style={styles.heard}>Micro đang tắt, Gừng không nghe thấy anh</Text>
-            ) : heard ? (
+            {heard && !(props.canMute && muted) ? (
               <Text style={styles.heard} numberOfLines={4}>{heard}</Text>
             ) : null}
           </View>

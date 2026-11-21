@@ -79,8 +79,8 @@ export function MicButton(props: {
 }
 
 /**
- * Nút tắt/bật micro cạnh nút micro chính. Đang tắt: nền đỏ cam, icon micro gạch chéo; đang bật: viền
- * vàng nhạt, icon micro thường.
+ * Nút tắt/bật micro cạnh nút micro chính, chỉ có icon. Luôn là icon micro gạch chéo (khác hẳn nút micro
+ * giữa): đang bật thì viền vàng nhạt, icon nâu; đang tắt thì nền đỏ cam, icon trắng.
  */
 export function MuteButton({ muted, onPress }: { muted: boolean; onPress: () => void }) {
   return (
@@ -92,7 +92,7 @@ export function MuteButton({ muted, onPress }: { muted: boolean; onPress: () => 
       accessibilityState={{ checked: muted }}
       accessibilityLabel={muted ? 'Bật lại micro' : 'Tắt micro'}
     >
-      {muted ? <MicOffIcon color="#FFF" size={28} /> : <MicIcon color={C.ink} size={28} />}
+      <MicOffIcon color={muted ? '#FFF' : C.ink} size={26} />
     </Pressable>
   );
 }
